@@ -10,7 +10,7 @@ import time
 if "GEMINI_API_KEY" in st.secrets:
     API_KEY = st.secrets["GEMINI_API_KEY"]
 else:
-    # CLEANED: API Key string removed to pass GitHub security scanning policies
+    # Fallback to local execution configuration
     API_KEY = ""
 
 if API_KEY != "":
@@ -35,7 +35,9 @@ st.sidebar.header("🎛️ Pipeline Control Center")
 
 # MASTER CONTROLLER: Switch between Image processing and Audio processing modes
 studio_mode = st.sidebar.radio("Select Ingestion Modality:", ["🖼️ Image Data Studio", "🔊 Audio Data Studio"])
-target_lang = st.sidebar.selectbox("Target Translation Language:", ["Kannada", "Hindi", "Tamil", "Telugu"])
+
+# FIXED LANGUAGES LIST: Cleaned down to exactly your four requested languages
+target_lang = st.sidebar.selectbox("Target Translation Language:", ["English", "Spanish", "French", "Hindi"])
 
 st.sidebar.markdown("---")
 st.sidebar.caption("System Connected: Cloud Engine Node")
@@ -59,7 +61,6 @@ if studio_mode == "🖼️ Image Data Studio":
             if API_KEY != "":
                 with st.spinner("🧠 Visual AI is running OCR and translation layout maps..."):
                     try:
-                        # In-memory layout compression module for large assets
                         img_buffer = io.BytesIO()
                         if raw_img.mode in ("RGBA", "P"):
                             raw_img = raw_img.convert("RGB")

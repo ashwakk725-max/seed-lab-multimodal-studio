@@ -6,11 +6,10 @@ import json
 import io
 import time
 
-# 1. Secure Cloud Key & Model Configuration
+# 1. Initialize the Master Live AI Engine
 if "GEMINI_API_KEY" in st.secrets:
     API_KEY = st.secrets["GEMINI_API_KEY"]
 else:
-    # Fallback to local execution configuration
     API_KEY = ""
 
 if API_KEY != "":
@@ -24,7 +23,6 @@ st.set_page_config(page_title="SEED Lab Multimodal QC Studio", layout="wide")
 st.title("🔬 Samsung SEED Lab: Unified Multimodal Data QC Studio")
 st.caption("Centralized Quality Control Pipeline for Vision & Speech Assets")
 
-# Initialize isolated system memories for both data logs
 if 'image_qc_log' not in st.session_state:
     st.session_state.image_qc_log = []
 if 'audio_qc_log' not in st.session_state:
@@ -32,11 +30,7 @@ if 'audio_qc_log' not in st.session_state:
 
 # --- SIDEBAR CONTROL PANEL ---
 st.sidebar.header("🎛️ Pipeline Control Center")
-
-# MASTER CONTROLLER: Switch between Image processing and Audio processing modes
 studio_mode = st.sidebar.radio("Select Ingestion Modality:", ["🖼️ Image Data Studio", "🔊 Audio Data Studio"])
-
-# FIXED LANGUAGES LIST: Cleaned down to exactly your four requested languages
 target_lang = st.sidebar.selectbox("Target Translation Language:", ["English", "Spanish", "French", "Hindi"])
 
 st.sidebar.markdown("---")
@@ -76,7 +70,7 @@ if studio_mode == "🖼️ Image Data Studio":
                             "translated_text": "Translate the extracted text accurately into {target_lang}.",
                             "visual_description": "Provide a clean description of the visual scene, layout, colors, and objects.",
                             "confidence_score": 0.95
-                        }}
+                    }}
                         Return ONLY the raw JSON string. No markdown wrappers.
                         """
                         response = model.generate_content([prompt, compressed_img])
@@ -154,8 +148,20 @@ elif studio_mode == "🔊 Audio Data Studio":
                 with st.spinner("🧠 Speech AI is rendering acoustic layers and transcribing..."):
                     try:
                         audio_bytes = uploaded_audio.read()
+                        
+                        # FIX: Mapping file types cleanly to official Internet MIME types
+                        ext = uploaded_audio.name.split('.')[-1].lower()
+                        if ext == "mp3":
+                            mime_type = "audio/mpeg"
+                        elif ext == "m4a":
+                            mime_type = "audio/m4a"
+                        elif ext == "wav":
+                            mime_type = "audio/wav"
+                        else:
+                            mime_type = f"audio/{ext}"
+
                         audio_payload = {
-                            "mime_type": f"audio/{uploaded_audio.name.split('.')[-1]}",
+                            "mime_type": mime_type,
                             "data": audio_bytes
                         }
 
@@ -180,6 +186,3 @@ elif studio_mode == "🔊 Audio Data Studio":
                         audio_confidence = data.get("confidence_score", 0.90)
                     except Exception as e:
                         st.error(f"Audio engine error: {str(e)}")
-                        transcript, translation, audio_description, audio_confidence = "Error", "Error", "Error", 0.0
-                    
-                raw_speech = st.text_area("1. Spoken Transcript (Live ASR)", value=transcript, height=70)

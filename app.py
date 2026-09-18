@@ -270,7 +270,30 @@ init_db()
 # ============================================================
 
 def hash_password(password: str, salt_hex: str | None = None):
-    salt = bytes.fromhex(salt_hex) if salt_hex else secrets.token_bytes(16)
+    """
+    Create a PBKDF2-SHA256 password hash.
+
+    A new 16-byte salt is generated when salt_hex is not supplied.
+    Existing salts are validated before being decoded so a damaged
+    database row cannot crash the whole Streamlit app.
+    """
+    if salt_hex is None or str(salt_hex).strip() == "":
+        salt = secrets.token_bytes(16)
+    else:
+        salt_hex = str(salt_hex).strip()
+
+        # A valid 16-byte salt is exactly 32 hexadecimal characters.
+        if len(salt_hex) != 32:
+            raise ValueError("Invalid stored password salt.")
+
+        try:
+            salt = bytes.fromhex(salt_hex)
+        except (TypeError, ValueError):
+            raise ValueError("Invalid stored password salt.")
+
+        if len(salt) != 16:
+            raise ValueError("Invalid stored password salt.")
+
     hashed = hashlib.pbkdf2_hmac(
         "sha256",
         password.encode("utf-8"),
@@ -281,8 +304,23 @@ def hash_password(password: str, salt_hex: str | None = None):
 
 
 def verify_password(password: str, stored_hash: str, salt_hex: str):
-    calculated, _ = hash_password(password, salt_hex)
-    return hmac.compare_digest(calculated, stored_hash)
+    """
+    Verify a password without allowing a corrupted user record
+    to crash the application.
+    """
+    if not password or not stored_hash or not salt_hex:
+        return False
+
+    try:
+        calculated, _ = hash_password(password, salt_hex)
+        return hmac.compare_digest(
+            str(calculated),
+            str(stored_hash).strip(),
+        )
+    except (TypeError, ValueError):
+        # The account's stored credentials are malformed.
+        # Treat the login as invalid instead of exposing a traceback.
+        return False
 
 
 # ============================================================

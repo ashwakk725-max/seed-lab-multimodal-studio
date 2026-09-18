@@ -244,22 +244,64 @@ def db():
 
 
 def init_db():
+    """
+    Create the users table and safely migrate older SQLite databases.
+
+    Streamlit Cloud can keep an older users.db from a previous version of
+    the app. In that case CREATE TABLE IF NOT EXISTS does not add newly
+    introduced columns, which can make registration fail with:
+    sqlite3.OperationalError: table users has no column named ...
+    """
     conn = db()
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            email TEXT UNIQUE NOT NULL,
-            password_hash TEXT NOT NULL,
-            salt TEXT NOT NULL,
-            profile_image TEXT,
-            created_at TEXT NOT NULL
+
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                email TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                salt TEXT NOT NULL,
+                profile_image TEXT,
+                created_at TEXT NOT NULL
+            )
+            """
         )
-        """
-    )
-    conn.commit()
-    conn.close()
+
+        # ---- Migrate an existing users table if it came from an older build.
+        columns = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(users)").fetchall()
+        }
+
+        migrations = {
+            "profile_image": "ALTER TABLE users ADD COLUMN profile_image TEXT",
+            "created_at": "ALTER TABLE users ADD COLUMN created_at TEXT",
+            "salt": "ALTER TABLE users ADD COLUMN salt TEXT",
+            "password_hash": "ALTER TABLE users ADD COLUMN password_hash TEXT",
+            "name": "ALTER TABLE users ADD COLUMN name TEXT",
+        }
+
+        for column, statement in migrations.items():
+            if column not in columns:
+                conn.execute(statement)
+
+        # Older rows may have NULL values after a column migration.
+        # Give them safe defaults so the table remains usable.
+        conn.execute(
+            "UPDATE users SET profile_image = '' WHERE profile_image IS NULL"
+        )
+        conn.execute(
+            "UPDATE users SET created_at = ? "
+            "WHERE created_at IS NULL OR TRIM(created_at) = ''",
+            (datetime.now().strftime("%Y-%m-%d %H:%M:%S"),),
+        )
+
+        conn.commit()
+
+    finally:
+        conn.close()
 
 
 init_db()
@@ -329,6 +371,16 @@ def verify_password(password: str, stored_hash: str, salt_hex: str):
 
 def create_user(name, email, password):
     email = email.strip().lower()
+    name = name.strip()
+
+    if not name:
+        return None, "Please enter your full name."
+
+    if not email:
+        return None, "Please enter your email address."
+
+    if not password:
+        return None, "Please enter a password."
 
     password_hash, salt = hash_password(password)
 
@@ -341,7 +393,7 @@ def create_user(name, email, password):
             VALUES (?, ?, ?, ?, ?, ?)
             """,
             (
-                name.strip(),
+                name,
                 email,
                 password_hash,
                 salt,
@@ -351,8 +403,17 @@ def create_user(name, email, password):
         )
         conn.commit()
         return cur.lastrowid, None
+
     except sqlite3.IntegrityError:
         return None, "An account with this email already exists."
+
+    except sqlite3.OperationalError as e:
+        # Do not expose the raw database error to the user.
+        return None, (
+            "The account database needs a migration. "
+            "Please refresh the app and try again."
+        )
+
     finally:
         conn.close()
 

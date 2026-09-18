@@ -1465,21 +1465,15 @@ def overview_page():
     )
 
     st.markdown(
-        """
-        <div class="hero">
-            <div class="hero-title">
-                Unified Multimodal Data QC
-            </div>
-
-            <div class="hero-text">
-                Process image and audio datasets with AI-powered
-                OCR, transcription, translation, descriptions,
-                confidence scoring and quality-control review.
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+    """
+    <div class="hero-text">
+        Process image and audio datasets with AI-powered
+        OCR, transcription, translation, descriptions,
+        confidence scoring and quality-control review.
+    </div>
+    """,
+    unsafe_allow_html=True
+)
 
     c1, c2, c3 = st.columns(3)
 

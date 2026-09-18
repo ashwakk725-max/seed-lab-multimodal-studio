@@ -6,34 +6,42 @@ import json
 import io
 import time
 
-# 1. Initialize the Master Live AI Engine
+# 1. Secure Cloud Key & Model Configuration
 if "GEMINI_API_KEY" in st.secrets:
     API_KEY = st.secrets["GEMINI_API_KEY"]
 else:
+    # CLEANED: API Key string removed to pass GitHub security scanning policies
     API_KEY = ""
 
 if API_KEY != "":
     genai.configure(api_key=API_KEY)
     model = genai.GenerativeModel('gemini-3.6-flash')
 else:
-    st.warning("🔒 Local Mode: Configure GEMINI_API_KEY in Secrets.")
+    st.warning("🔒 Local Mode: Please deploy to Streamlit Cloud and configure your GEMINI_API_KEY in Advanced Secrets to activate live processing.")
 
-# Set up browser layout
+# Set up the desktop web browser layout
 st.set_page_config(page_title="SEED Lab Multimodal QC Studio", layout="wide")
 st.title("🔬 Samsung SEED Lab: Unified Multimodal Data QC Studio")
 st.caption("Centralized Quality Control Pipeline for Vision & Speech Assets")
 
+# Initialize isolated system memories for both data logs
 if 'image_qc_log' not in st.session_state:
     st.session_state.image_qc_log = []
 if 'audio_qc_log' not in st.session_state:
     st.session_state.audio_qc_log = []
 
-# Sidebar control panel
+# --- SIDEBAR CONTROL PANEL ---
 st.sidebar.header("🎛️ Pipeline Control Center")
+
+# MASTER CONTROLLER: Switch between Image processing and Audio processing modes
 studio_mode = st.sidebar.radio("Select Ingestion Modality:", ["🖼️ Image Data Studio", "🔊 Audio Data Studio"])
+
+# FIXED LANGUAGES LIST: Trimming selection down to your exact request
 target_lang = st.sidebar.selectbox("Target Translation Language:", ["English", "Spanish", "French", "Hindi"])
+
 st.sidebar.markdown("---")
 st.sidebar.caption("System Connected: Cloud Engine Node")
+
 
 # ==============================================================================
 # 🖼️ MODE 1: IMAGE PROCESSING STUDIO
@@ -41,6 +49,7 @@ st.sidebar.caption("System Connected: Cloud Engine Node")
 if studio_mode == "🖼️ Image Data Studio":
     st.sidebar.subheader("Ingest Image Asset")
     uploaded_file = st.sidebar.file_uploader("Upload Image File", type=["jpg", "png", "jpeg"])
+    
     left_panel, right_panel = st.columns([1, 1.2])
     
     with left_panel:
@@ -50,9 +59,11 @@ if studio_mode == "🖼️ Image Data Studio":
             st.image(raw_img, caption="Active Image Asset", use_container_width=True)
             
             extracted_text, translated_text, visual_description, ocr_confidence = "Error", "Error", "Error", 0.0
+            
             if API_KEY != "":
-                with st.spinner("🧠 Visual AI is processing layout maps..."):
+                with st.spinner("🧠 Visual AI is running OCR and translation layout maps..."):
                     try:
+                        # In-memory layout compression module for large assets
                         img_buffer = io.BytesIO()
                         if raw_img.mode in ("RGBA", "P"):
                             raw_img = raw_img.convert("RGB")
@@ -62,14 +73,14 @@ if studio_mode == "🖼️ Image Data Studio":
 
                         prompt = f"""
                         Analyze this image for an AI training data engineering pipeline. 
-                        Return output strictly matching this JSON template:
+                        Return output strictly in this JSON structure:
                         {{
-                            "extracted_text": "Extract all text exactly.",
-                            "translated_text": "Translate accurately into {target_lang}.",
-                            "visual_description": "Describe visual elements clearly.",
+                            "extracted_text": "Extract all visible text. If none, say 'No text found.'",
+                            "translated_text": "Translate the extracted text accurately into {target_lang}.",
+                            "visual_description": "Provide a clean description of the visual scene, layout, colors, and objects.",
                             "confidence_score": 0.95
                         }}
-                        Return raw JSON string only. Do not use any markdown formatting blocks.
+                        Return ONLY the raw JSON string. No markdown wrappers.
                         """
                         response = model.generate_content([prompt, compressed_img])
                         clean_text = response.text.replace("```json", "").replace("```", "").strip()
@@ -80,11 +91,14 @@ if studio_mode == "🖼️ Image Data Studio":
                         visual_description = data.get("visual_description", "No description available.")
                         ocr_confidence = data.get("confidence_score", 0.90)
                     except Exception as e:
-                        st.error(f"Vision structural parsing trace error: {str(e)}")
-                        
-            raw_txt = st.text_area("1. Extracted Text (Live OCR)", value=extracted_text, height=70)
-            trans_txt = st.text_area(f"2. Live Translated Output ({target_lang})", value=translated_text, height=70)
-            desc_txt = st.text_area("3. AI Visual Scene Description", value=visual_description, height=100)
+                        st.error(f"Vision engine error: {str(e)}")
+                        extracted_text, translated_text, visual_description, ocr_confidence = "Error", "Error", "Error", 0.0
+                
+                raw_txt = st.text_area("1. Extracted Text (Live OCR)", value=extracted_text, height=70)
+                trans_txt = st.text_area(f"2. Live Translated Output ({target_lang})", value=translated_text, height=70)
+                desc_txt = st.text_area("3. AI Visual Scene Description", value=visual_description, height=100)
+            else:
+                st.info("System is offline. Active API key needed in Streamlit Secrets.")
         else:
             st.info("Awaiting image dataset payload via the control panel.")
 
@@ -98,6 +112,7 @@ if studio_mode == "🖼️ Image Data Studio":
             st.write(f"{'✅' if c2 else '❌'} **Rule 2: Semantic Density Verification** ({len(desc_txt.split())} words)")
             c3 = all([raw_txt, trans_txt, desc_txt]) and "Error" not in [raw_txt, trans_txt, desc_txt]
             st.write(f"{'✅' if c3 else '❌'} **Rule 3: Non-Null Structural Payload**")
+            
             st.markdown("---")
             st.markdown("#### **Data Auditor Console**")
             audit_verdict = st.radio("Pipeline Routing Action:", ["Approve & Record", "Flag for Text Adjustments", "Reject Dataset Item"])
@@ -123,12 +138,14 @@ if studio_mode == "🖼️ Image Data Studio":
         else:
             st.caption("No dynamic image rows logged in this batch yet.")
 
+
 # ==============================================================================
 # 🔊 MODE 2: AUDIO PROCESSING STUDIO
 # ==============================================================================
 elif studio_mode == "🔊 Audio Data Studio":
     st.sidebar.subheader("Ingest Audio Asset")
     uploaded_audio = st.sidebar.file_uploader("Upload Audio File", type=["mp3", "wav", "m4a", "ogg"])
+    
     left_panel, right_panel = st.columns([1, 1.2])
     
     with left_panel:
@@ -139,15 +156,16 @@ elif studio_mode == "🔊 Audio Data Studio":
             transcript = "No text found."
             translation = "No translation available."
             audio_description = "Processing track..."
-            audio_confidence = 0.95
+            audio_confidence = 0.90
             
             if API_KEY != "":
-                with st.spinner("🧠 Speech AI is transcribing and listening..."):
+                with st.spinner("🧠 Speech AI is rendering acoustic layers and transcribing..."):
                     try:
                         audio_bytes = uploaded_audio.read()
+                        
                         ext = uploaded_audio.name.split('.')[-1].lower()
                         mime_type = "audio/mpeg" if ext == "mp3" else f"audio/{ext}"
-                        
+
                         audio_payload = {
                             "mime_type": mime_type,
                             "data": audio_bytes
@@ -155,31 +173,19 @@ elif studio_mode == "🔊 Audio Data Studio":
 
                         prompt = f"""
                         Analyze this audio track carefully for a data engineering pipeline. 
-                        Listen to the music or speech and provide your response using these exact markers:
-
-                        [START_TRANSCRIPT]
-                        Write down any lyrics or spoken text you hear. If it is only background music, write: 'Background music track detected.'
-                        [END_TRANSCRIPT]
-
-                        [START_TRANSLATION]
-                        Translate the text you just wrote above accurately into {target_lang}.
-                        [END_TRANSLATION]
-
-                        [START_DESCRIPTION]
-                        Provide a thorough description of the audio track. Identify the musical instruments, the tempo, the overall genre, vocal elements, background clarity, and mood.
-                        [END_DESCRIPTION]
+                        You MUST return the output strictly matching this template:
+                        {{
+                            "transcript": "Write the exact song lyrics or spoken text here.",
+                            "translation": "Translate that text cleanly into {target_lang}.",
+                            "audio_description": "Describe the instruments, music genre, background noises, and audio clarity here.",
+                            "confidence_score": 0.95
+                        }}
+                        Do not wrap the text in code blocks. Return the raw string block.
                         """
                         response = model.generate_content([prompt, audio_payload])
-                        res_text = response.text
                         
-                        # FIXED SYNTAX: Added standard list indexes to prevent blank crashes
-                        if "[START_TRANSCRIPT]" in res_text and "[END_TRANSCRIPT]" in res_text:
-                            transcript = res_text.split("[START_TRANSCRIPT]")[1].split("[END_TRANSCRIPT]")[0].strip()
-                        if "[START_TRANSLATION]" in res_text and "[END_TRANSLATION]" in res_text:
-                            translation = res_text.split("[START_TRANSLATION]")[1].split("[END_TRANSLATION]")[0].strip()
-                        if "[START_DESCRIPTION]" in res_text and "[END_DESCRIPTION]" in res_text:
-                            audio_description = res_text.split("[START_DESCRIPTION]")[1].split("[END_DESCRIPTION]")[0].strip()
-                            
-                    except Exception as e:
-                        transcript = "Processing Complete"
-                        translation = f"Processed to {target_lang}"
+                        raw_response_text = response.text.replace("```json", "").replace("```", "").strip()
+                        data = json.loads(raw_response_text)
+                        
+                        transcript = data.get("transcript", "No speech detected.")
+                        translation = data.get("translation", "No translation available.")

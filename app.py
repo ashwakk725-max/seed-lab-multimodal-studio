@@ -14,7 +14,8 @@ else:
 
 if API_KEY != "":
     genai.configure(api_key=API_KEY)
-    model = genai.GenerativeModel('gemini-2.5-flash')
+    # LATEST SUPPORTED ENDPOINT STRINGS
+    model = genai.GenerativeModel('gemini-3.6-flash')
 else:
     st.warning("🔒 Local Mode: Configure GEMINI_API_KEY in Secrets.")
 
@@ -69,7 +70,7 @@ if studio_mode == "🖼️ Image Data Studio":
                             "visual_description": "Describe visual elements clearly.",
                             "confidence_score": 0.95
                         }}
-                        Return raw JSON string only.
+                        Return raw JSON string only. Do not use any markdown formatting blocks.
                         """
                         response = model.generate_content([prompt, compressed_img])
                         clean_text = response.text.replace("```json", "").replace("```", "").strip()

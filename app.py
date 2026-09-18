@@ -172,7 +172,7 @@ elif studio_mode == "🔊 Audio Data Studio":
                         response = model.generate_content([prompt, audio_payload])
                         res_text = response.text
                         
-                        # Direct, error-proof text matching strategy
+                        # Direct string clean-cut isolation strategy
                         if "[START_TRANSCRIPT]" in res_text and "[END_TRANSCRIPT]" in res_text:
                             transcript = res_text.split("[START_TRANSCRIPT]")[1].split("[END_TRANSCRIPT]")[0].strip()
                         
@@ -182,4 +182,6 @@ elif studio_mode == "🔊 Audio Data Studio":
                         if "[START_DESCRIPTION]" in res_text and "[END_DESCRIPTION]" in res_text:
                             audio_description = res_text.split("[START_DESCRIPTION]")[1].split("[END_DESCRIPTION]")[0].strip()
                         else:
-                            # Direct fallback if the model dumps raw content text without using tags perfectly
+                            audio_description = res_text.strip()
+                            
+                    except Exception as e:

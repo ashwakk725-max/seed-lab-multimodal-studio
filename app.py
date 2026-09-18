@@ -185,8 +185,8 @@ elif studio_mode == "🔊 Audio Data Studio":
                         """
                         response = model.generate_content([prompt, audio_payload])
                         
-                        # Robust multi-layer cleanup strip logic to prevent silent block errors
+                        # CLEANED & RE-SPACED: Fixed the indentation crash
                         raw_response_text = response.text.strip()
-                        if raw_response_text.startswith("```"):
-                            raw_response_text = raw_response_text.split("\n", 1)[1]
-                        if raw_response_text.endswith("```"):
+                        raw_response_text = raw_response_text.replace("```json", "").replace("```", "").strip()
+                        
+                        data = json.loads(raw_response_text)

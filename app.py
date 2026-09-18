@@ -32,77 +32,174 @@ st.set_page_config(
 st.markdown(
     """
     <style>
+
+    /* Main application */
     .stApp {
-        background:
-            radial-gradient(circle at 15% 10%, rgba(70, 80, 180, 0.16), transparent 30%),
-            radial-gradient(circle at 85% 20%, rgba(120, 50, 190, 0.13), transparent 30%),
-            #080b16;
-        color: #f3f5ff;
+        background: #f5f7fb;
+        color: #172033;
     }
 
+    /* Sidebar */
     [data-testid="stSidebar"] {
-        background: #0b0f1d;
-        border-right: 1px solid rgba(255,255,255,0.08);
+        background: #ffffff;
+        border-right: 1px solid #dfe4ee;
     }
 
     [data-testid="stSidebar"] * {
-        color: #e9ecff;
+        color: #172033 !important;
     }
 
-    h1, h2, h3 {
-        letter-spacing: -0.02em;
-    }
-
+    /* Main content */
     .block-container {
         padding-top: 2rem;
         padding-bottom: 3rem;
         max-width: 1450px;
     }
 
-    [data-testid="stMetric"] {
-        background: rgba(255,255,255,0.035);
-        border: 1px solid rgba(255,255,255,0.08);
-        padding: 18px;
-        border-radius: 14px;
+    /* Headings */
+    h1, h2, h3, h4 {
+        color: #172033 !important;
+        letter-spacing: -0.02em;
     }
 
+    /* Normal text */
+    p, label, span, div {
+        color: #25304a;
+    }
+
+    /* Captions */
+    [data-testid="stCaptionContainer"] {
+        color: #65708a !important;
+    }
+
+    /* Metrics */
+    [data-testid="stMetric"] {
+        background: #ffffff;
+        border: 1px solid #dfe4ee;
+        padding: 18px;
+        border-radius: 14px;
+        box-shadow: 0 3px 12px rgba(20, 35, 70, 0.06);
+    }
+
+    [data-testid="stMetricLabel"] {
+        color: #65708a !important;
+    }
+
+    [data-testid="stMetricValue"] {
+        color: #172033 !important;
+    }
+
+    /* File uploader */
     [data-testid="stFileUploader"] {
-        background: rgba(255,255,255,0.025);
-        border: 1px dashed rgba(130,140,255,0.4);
+        background: #ffffff;
+        border: 1px dashed #9aa8c7;
         border-radius: 14px;
         padding: 8px;
     }
 
+    [data-testid="stFileUploader"] * {
+        color: #25304a !important;
+    }
+
+    /* Buttons */
     .stButton > button,
     .stDownloadButton > button {
         border-radius: 10px;
         font-weight: 600;
-        border: 1px solid rgba(130,140,255,0.35);
+        border: 1px solid #b7c1d8;
+        background: #ffffff;
+        color: #172033 !important;
     }
 
-    .status-good {
-        padding: 10px 14px;
+    .stButton > button:hover,
+    .stDownloadButton > button:hover {
+        border-color: #5969d8;
+        color: #3f4fc4 !important;
+    }
+
+    /* Primary button */
+    .stButton > button[kind="primary"] {
+        background: #4f5fd1;
+        color: #ffffff !important;
+        border: none;
+    }
+
+    /* Text areas */
+    textarea {
+        background: #ffffff !important;
+        color: #172033 !important;
+        border: 1px solid #d5dbe8 !important;
+        border-radius: 10px !important;
+    }
+
+    /* Select boxes */
+    [data-baseweb="select"] > div {
+        background: #ffffff !important;
+        color: #172033 !important;
+        border-color: #d5dbe8 !important;
+    }
+
+    [data-baseweb="select"] * {
+        color: #172033 !important;
+    }
+
+    /* Number inputs */
+    [data-testid="stNumberInput"] input {
+        background: #ffffff !important;
+        color: #172033 !important;
+        border-color: #d5dbe8 !important;
+    }
+
+    /* Radio buttons */
+    [data-testid="stRadio"] label {
+        color: #25304a !important;
+    }
+
+    /* Tabs */
+    button[data-baseweb="tab"] {
+        color: #4b5872 !important;
+    }
+
+    button[data-baseweb="tab"][aria-selected="true"] {
+        color: #3f4fc4 !important;
+        font-weight: 700;
+    }
+
+    /* Dataframes */
+    [data-testid="stDataFrame"] {
+        background: #ffffff;
+        border: 1px solid #dfe4ee;
+        border-radius: 12px;
+    }
+
+    /* Alerts */
+    [data-testid="stAlert"] {
         border-radius: 10px;
-        background: rgba(30, 180, 110, 0.12);
-        border: 1px solid rgba(30, 180, 110, 0.35);
     }
 
-    .status-bad {
-        padding: 10px 14px;
+    /* Expanders */
+    [data-testid="stExpander"] {
+        background: #ffffff;
+        border: 1px solid #dfe4ee;
+        border-radius: 12px;
+    }
+
+    /* Dividers */
+    hr {
+        border-color: #dfe4ee;
+    }
+
+    /* Code blocks */
+    pre {
+        background: #eef1f7 !important;
+        color: #172033 !important;
         border-radius: 10px;
-        background: rgba(220, 70, 90, 0.12);
-        border: 1px solid rgba(220, 70, 90, 0.35);
     }
 
-    .small-muted {
-        color: #9aa3c7;
-        font-size: 0.88rem;
-    }
     </style>
     """,
     unsafe_allow_html=True,
 )
-
 
 # ============================================================
 # GEMINI CONFIG

@@ -1,17 +1,17 @@
-import io
-import json
 import os
 import re
-import sqlite3
+import csv
+import json
 import time
+import sqlite3
 import hashlib
-import hmac
-import base64
+import secrets
+from datetime import datetime
 from pathlib import Path
 
-import pandas as pd
 import streamlit as st
 from PIL import Image
+
 from google import genai
 from google.genai import types
 
@@ -21,7 +21,7 @@ from google.genai import types
 # ============================================================
 
 st.set_page_config(
-    page_title="SEED Lab Multimodal Studio",
+    page_title="SEED Lab | Multimodal Data QC",
     page_icon="🌿",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -32,187 +32,335 @@ st.set_page_config(
 # PATHS
 # ============================================================
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path("seed_lab_data")
+PROFILE_DIR = BASE_DIR / "profiles"
+DB_PATH = BASE_DIR / "users.db"
 
-DATA_DIR = BASE_DIR / "seed_lab_data"
-PROFILE_DIR = DATA_DIR / "profiles"
-DB_PATH = DATA_DIR / "users.db"
-
-DATA_DIR.mkdir(exist_ok=True)
+BASE_DIR.mkdir(exist_ok=True)
 PROFILE_DIR.mkdir(exist_ok=True)
 
 
 # ============================================================
-# GREEN THEME
+# PROFESSIONAL UI
 # ============================================================
 
 st.markdown(
     """
-    <style>
+<style>
 
-    .stApp {
-        background: #f3faf7;
-        color: #17352d;
-    }
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
-    .block-container {
-        max-width: 1450px;
-        padding-top: 2rem;
-        padding-bottom: 3rem;
-    }
+html, body, [class*="css"] {
+    font-family: 'Inter', sans-serif;
+}
 
-    [data-testid="stSidebar"] {
-        background: #ffffff;
-        border-right: 1px solid #d8ebe3;
-    }
+.stApp {
+    background:
+        radial-gradient(circle at 80% 0%, rgba(33, 150, 83, 0.08), transparent 25%),
+        #f6f8f7;
+}
 
-    [data-testid="stSidebar"] h1,
-    [data-testid="stSidebar"] h2,
-    [data-testid="stSidebar"] h3 {
-        color: #174d3b !important;
-    }
+/* ---------- SIDEBAR ---------- */
 
-    [data-testid="stSidebar"] p,
-    [data-testid="stSidebar"] label {
-        color: #3f5f55 !important;
-    }
+section[data-testid="stSidebar"] {
+    background: #10251b;
+    border-right: 1px solid rgba(255,255,255,0.06);
+}
 
-    h1 {
-        color: #174d3b !important;
-        font-weight: 750 !important;
-    }
+section[data-testid="stSidebar"] * {
+    color: #eaf4ee !important;
+}
 
-    h2 {
-        color: #1c5843 !important;
-    }
+section[data-testid="stSidebar"] .stButton button {
+    background: transparent;
+    border: 1px solid transparent;
+    color: #dce9e1 !important;
+    text-align: left;
+    border-radius: 10px;
+    transition: all .2s ease;
+}
 
-    h3 {
-        color: #24634d !important;
-    }
+section[data-testid="stSidebar"] .stButton button:hover {
+    background: rgba(255,255,255,.08);
+    border-color: rgba(255,255,255,.08);
+}
 
-    p {
-        color: #3f5f55;
-    }
+.sidebar-brand {
+    padding: 8px 4px 22px 4px;
+}
 
-    [data-testid="stCaptionContainer"] {
-        color: #6b837a !important;
-    }
+.sidebar-logo {
+    width: 42px;
+    height: 42px;
+    border-radius: 12px;
+    background: #37a866;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 23px;
+    margin-bottom: 12px;
+}
 
-    [data-testid="stMetric"] {
-        background: #ffffff;
-        border: 1px solid #d7ebe2;
-        border-radius: 14px;
-        padding: 18px;
-        box-shadow: 0 3px 12px rgba(28, 91, 67, 0.06);
-    }
+.sidebar-title {
+    font-size: 18px;
+    font-weight: 800;
+    color: white;
+}
 
-    [data-testid="stMetricLabel"] {
-        color: #668078 !important;
-    }
+.sidebar-subtitle {
+    color: #9fb5a7;
+    font-size: 12px;
+    margin-top: 3px;
+}
 
-    [data-testid="stMetricValue"] {
-        color: #174d3b !important;
-    }
+.sidebar-section {
+    color: #71917d;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 1.5px;
+    margin: 24px 0 8px 4px;
+}
 
-    [data-testid="stFileUploader"] {
-        background: #ffffff;
-        border: 1px dashed #82b9a3;
-        border-radius: 14px;
-        padding: 10px;
-    }
+.user-card {
+    background: rgba(255,255,255,.06);
+    border: 1px solid rgba(255,255,255,.08);
+    border-radius: 14px;
+    padding: 12px;
+    margin: 10px 0 20px 0;
+}
 
-    [data-testid="stFileUploaderDropzone"] {
-        background: #f8fcfa;
-        border-radius: 12px;
-    }
+.user-name {
+    font-size: 13px;
+    font-weight: 700;
+    color: white;
+}
 
-    .stButton > button,
-    .stDownloadButton > button {
-        border-radius: 10px;
-        min-height: 42px;
-        font-weight: 650;
-        background: #ffffff;
-        color: #1b5944 !important;
-        border: 1px solid #9cc8b5;
-    }
+.user-email {
+    font-size: 11px;
+    color: #9fb5a7;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
 
-    .stButton > button:hover,
-    .stDownloadButton > button:hover {
-        border-color: #249568;
-        color: #18734f !important;
-        background: #f2fbf6;
-    }
+/* ---------- MAIN ---------- */
 
-    .stButton > button[kind="primary"] {
-        background: #19a66b !important;
-        color: #ffffff !important;
-        border: 1px solid #15945f !important;
-    }
+.page-title {
+    font-size: 34px;
+    font-weight: 800;
+    color: #14231b;
+    margin-bottom: 4px;
+}
 
-    .stButton > button[kind="primary"]:hover {
-        background: #148d59 !important;
-        color: #ffffff !important;
-    }
+.page-subtitle {
+    color: #6c7d73;
+    font-size: 14px;
+    margin-bottom: 30px;
+}
 
-    input,
-    textarea {
-        background: #ffffff !important;
-        color: #183c31 !important;
-    }
+.eyebrow {
+    color: #299452;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 1.8px;
+    margin-bottom: 8px;
+}
 
-    textarea {
-        border: 1px solid #cfe4da !important;
-        border-radius: 10px !important;
-    }
+.hero {
+    background: linear-gradient(135deg, #ffffff 0%, #eef8f1 100%);
+    border: 1px solid #dce8df;
+    border-radius: 22px;
+    padding: 30px;
+    margin-bottom: 24px;
+    box-shadow: 0 8px 30px rgba(21, 54, 35, .05);
+}
 
-    [data-testid="stTextInput"] input,
-    [data-testid="stNumberInput"] input {
-        background: #ffffff !important;
-        color: #183c31 !important;
-        border-color: #cfe4da !important;
-    }
+.hero-title {
+    font-size: 29px;
+    font-weight: 800;
+    color: #13271c;
+}
 
-    [data-baseweb="select"] > div {
-        background: #ffffff !important;
-        border-color: #cfe4da !important;
-        color: #183c31 !important;
-    }
+.hero-text {
+    color: #687a70;
+    font-size: 14px;
+    margin-top: 8px;
+}
 
-    [data-testid="stRadio"] label {
-        color: #24483d !important;
-    }
+/* ---------- CARDS ---------- */
 
-    button[data-baseweb="tab"] {
-        color: #5a7169 !important;
-    }
+.metric-card {
+    background: white;
+    border: 1px solid #e0e9e3;
+    border-radius: 16px;
+    padding: 19px;
+    min-height: 110px;
+    box-shadow: 0 5px 20px rgba(30,55,40,.035);
+}
 
-    button[data-baseweb="tab"][aria-selected="true"] {
-        color: #168457 !important;
-        font-weight: 700;
-    }
+.metric-label {
+    color: #718078;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .8px;
+}
 
-    [data-testid="stDataFrame"] {
-        background: #ffffff;
-        border: 1px solid #d7ebe2;
-        border-radius: 12px;
-    }
+.metric-value {
+    color: #15271d;
+    font-size: 29px;
+    font-weight: 800;
+    margin-top: 8px;
+}
 
-    [data-testid="stExpander"] {
-        background: #ffffff;
-        border: 1px solid #d7ebe2;
-        border-radius: 12px;
-    }
+.metric-green {
+    color: #269653;
+}
 
-    [data-testid="stAlert"] {
-        border-radius: 10px;
-    }
+/* ---------- STUDIO CARDS ---------- */
 
-    hr {
-        border-color: #d7ebe2 !important;
-    }
+.studio-card {
+    background: white;
+    border: 1px solid #dfe8e2;
+    border-radius: 20px;
+    padding: 24px;
+    min-height: 245px;
+    box-shadow: 0 7px 25px rgba(30,55,40,.045);
+}
 
-    </style>
-    """,
+.studio-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 13px;
+    background: #eaf7ee;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    margin-bottom: 17px;
+}
+
+.studio-title {
+    font-size: 19px;
+    font-weight: 800;
+    color: #16281e;
+}
+
+.studio-description {
+    color: #718078;
+    font-size: 13px;
+    line-height: 1.6;
+    margin: 8px 0 20px;
+}
+
+/* ---------- BUTTONS ---------- */
+
+.stButton > button {
+    border-radius: 10px;
+    min-height: 42px;
+    font-weight: 700;
+    border: 1px solid #d5e1d9;
+    background: white;
+    color: #203128;
+    transition: all .18s ease;
+}
+
+.stButton > button:hover {
+    border-color: #39a963;
+    color: #20834a;
+    transform: translateY(-1px);
+}
+
+.primary-btn .stButton > button {
+    background: #238b4c;
+    color: white !important;
+    border-color: #238b4c;
+}
+
+/* ---------- UPLOAD ---------- */
+
+.upload-panel {
+    background: white;
+    border: 1px dashed #b8cdbd;
+    border-radius: 18px;
+    padding: 30px;
+    text-align: center;
+}
+
+/* ---------- RESULTS ---------- */
+
+.result-card {
+    background: white;
+    border: 1px solid #dfe8e2;
+    border-radius: 17px;
+    padding: 20px;
+    margin-bottom: 16px;
+}
+
+.result-heading {
+    color: #1a2b21;
+    font-size: 14px;
+    font-weight: 800;
+    margin-bottom: 10px;
+}
+
+.result-text {
+    color: #5f7067;
+    font-size: 13px;
+    line-height: 1.7;
+}
+
+.status-pass {
+    background: #e8f7ed;
+    color: #237b43;
+    border: 1px solid #c9e9d3;
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-weight: 800;
+    text-align: center;
+}
+
+.status-review {
+    background: #fff6df;
+    color: #9b6a13;
+    border: 1px solid #f0dfad;
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-weight: 800;
+    text-align: center;
+}
+
+/* ---------- PROFILE ---------- */
+
+.profile-card {
+    background: white;
+    border: 1px solid #dfe8e2;
+    border-radius: 20px;
+    padding: 25px;
+    box-shadow: 0 7px 25px rgba(30,55,40,.04);
+}
+
+/* ---------- DIVIDER ---------- */
+
+hr {
+    border-color: #e0e8e2 !important;
+}
+
+/* ---------- HIDE STREAMLIT BRANDING ---------- */
+
+#MainMenu {
+    visibility: hidden;
+}
+
+footer {
+    visibility: hidden;
+}
+
+header {
+    background: transparent !important;
+}
+
+</style>
+""",
     unsafe_allow_html=True,
 )
 
@@ -221,27 +369,21 @@ st.markdown(
 # DATABASE
 # ============================================================
 
-def get_connection():
-    conn = sqlite3.connect(
-        DB_PATH,
-        check_same_thread=False,
-    )
-
+def get_db():
+    conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
-
     return conn
 
 
-def init_database():
-
-    conn = get_connection()
+def init_db():
+    conn = get_db()
 
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
-            email TEXT NOT NULL UNIQUE,
+            email TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
             salt TEXT NOT NULL,
             profile_picture TEXT,
@@ -254,150 +396,83 @@ def init_database():
     conn.close()
 
 
-init_database()
+init_db()
 
 
 # ============================================================
 # PASSWORD SECURITY
 # ============================================================
 
-def hash_password(password):
-
-    salt = os.urandom(16)
+def hash_password(password, salt=None):
+    if salt is None:
+        salt = secrets.token_hex(16)
 
     password_hash = hashlib.pbkdf2_hmac(
         "sha256",
-        password.encode("utf-8"),
-        salt,
+        password.encode(),
+        bytes.fromhex(salt),
         120000,
-    )
+    ).hex()
 
-    return (
-        base64.b64encode(password_hash).decode(),
-        base64.b64encode(salt).decode(),
-    )
+    return password_hash, salt
 
 
-def verify_password(
-    password,
-    stored_hash,
-    stored_salt,
-):
-
-    try:
-
-        salt = base64.b64decode(
-            stored_salt
-        )
-
-        expected_hash = hashlib.pbkdf2_hmac(
-            "sha256",
-            password.encode("utf-8"),
-            salt,
-            120000,
-        )
-
-        expected_hash = base64.b64encode(
-            expected_hash
-        ).decode()
-
-        return hmac.compare_digest(
-            expected_hash,
-            stored_hash,
-        )
-
-    except Exception:
-
-        return False
+def verify_password(password, stored_hash, salt):
+    password_hash, _ = hash_password(password, salt)
+    return secrets.compare_digest(password_hash, stored_hash)
 
 
 # ============================================================
-# USER DATABASE FUNCTIONS
+# USER FUNCTIONS
 # ============================================================
 
-def create_user(
-    name,
-    email,
-    password,
-    profile_picture=None,
-):
+def create_user(name, email, password, profile_picture=None):
 
-    conn = get_connection()
+    conn = get_db()
 
     try:
-
-        password_hash, salt = hash_password(
-            password
-        )
-
-        created_at = time.strftime(
-            "%Y-%m-%d %H:%M:%S"
-        )
+        password_hash, salt = hash_password(password)
 
         cursor = conn.execute(
             """
             INSERT INTO users
-            (
-                name,
-                email,
-                password_hash,
-                salt,
-                profile_picture,
-                created_at
-            )
+            (name, email, password_hash, salt, profile_picture, created_at)
             VALUES (?, ?, ?, ?, ?, ?)
             """,
             (
-                name.strip(),
-                email.strip().lower(),
+                name,
+                email.lower().strip(),
                 password_hash,
                 salt,
                 profile_picture,
-                created_at,
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             ),
         )
 
         conn.commit()
-
         user_id = cursor.lastrowid
 
-        return user_id, None
+        return user_id
 
     except sqlite3.IntegrityError:
-
-        return None, "An account with this email already exists."
-
-    except Exception as error:
-
-        return None, str(error)
+        return None
 
     finally:
-
         conn.close()
 
 
-def authenticate_user(
-    email,
-    password,
-):
+def authenticate_user(email, password):
 
-    conn = get_connection()
+    conn = get_db()
 
     user = conn.execute(
-        """
-        SELECT *
-        FROM users
-        WHERE email = ?
-        """,
-        (
-            email.strip().lower(),
-        ),
+        "SELECT * FROM users WHERE email = ?",
+        (email.lower().strip(),),
     ).fetchone()
 
     conn.close()
 
     if not user:
-
         return None
 
     if verify_password(
@@ -405,7 +480,6 @@ def authenticate_user(
         user["password_hash"],
         user["salt"],
     ):
-
         return dict(user)
 
     return None
@@ -413,84 +487,49 @@ def authenticate_user(
 
 def get_user(user_id):
 
-    conn = get_connection()
+    conn = get_db()
 
     user = conn.execute(
-        """
-        SELECT *
-        FROM users
-        WHERE id = ?
-        """,
+        "SELECT * FROM users WHERE id = ?",
         (user_id,),
     ).fetchone()
 
     conn.close()
 
-    if user:
-
-        return dict(user)
-
-    return None
+    return dict(user) if user else None
 
 
-def update_user(
-    user_id,
-    name,
-    profile_picture=None,
-):
+def update_user(user_id, name, profile_picture):
 
-    conn = get_connection()
+    conn = get_db()
 
-    if profile_picture is not None:
-
-        conn.execute(
-            """
-            UPDATE users
-            SET name = ?,
-                profile_picture = ?
-            WHERE id = ?
-            """,
-            (
-                name.strip(),
-                profile_picture,
-                user_id,
-            ),
-        )
-
-    else:
-
-        conn.execute(
-            """
-            UPDATE users
-            SET name = ?
-            WHERE id = ?
-            """,
-            (
-                name.strip(),
-                user_id,
-            ),
-        )
+    conn.execute(
+        """
+        UPDATE users
+        SET name = ?, profile_picture = ?
+        WHERE id = ?
+        """,
+        (
+            name,
+            profile_picture,
+            user_id,
+        ),
+    )
 
     conn.commit()
     conn.close()
 
 
-def change_password(
-    user_id,
-    new_password,
-):
+def change_password(user_id, new_password):
 
-    password_hash, salt = hash_password(
-        new_password
-    )
+    password_hash, salt = hash_password(new_password)
 
-    conn = get_connection()
+    conn = get_db()
 
     conn.execute(
         """
         UPDATE users
-        SET password_hash = ?,
-            salt = ?
+        SET password_hash = ?, salt = ?
         WHERE id = ?
         """,
         (
@@ -508,948 +547,495 @@ def change_password(
 # SESSION STATE
 # ============================================================
 
-if "logged_in" not in st.session_state:
-    st.session_state.logged_in = False
+DEFAULT_STATE = {
+    "logged_in": False,
+    "user_id": None,
+    "page": "dashboard",
+    "settings_open": False,
+    "studio": "dashboard",
+    "image_result": None,
+    "audio_result": None,
+    "manifest": [],
+}
 
-if "user_id" not in st.session_state:
-    st.session_state.user_id = None
 
-if "auth_page" not in st.session_state:
-    st.session_state.auth_page = "Login"
+for key, value in DEFAULT_STATE.items():
 
-if "image_result" not in st.session_state:
-    st.session_state.image_result = None
-
-if "audio_result" not in st.session_state:
-    st.session_state.audio_result = None
-
-if "manifest" not in st.session_state:
-    st.session_state.manifest = []
-
-if "app_mode" not in st.session_state:
-    st.session_state.app_mode = "Image Data Studio"
-
-if "settings_open" not in st.session_state:
-    st.session_state.settings_open = False
+    if key not in st.session_state:
+        st.session_state[key] = value
 
 
 # ============================================================
-# AUTHENTICATION SCREEN
+# AUTHENTICATION PAGE
 # ============================================================
 
-def authentication_screen():
+def authentication_page():
 
-    st.markdown(
-        "",
-        unsafe_allow_html=True,
-    )
+    left, center, right = st.columns([1, 1.25, 1])
 
-    st.title(
-        "🌿 SEED Lab"
-    )
+    with center:
 
-    st.subheader(
-        "Multimodal Data QC Studio"
-    )
+        st.markdown(
+            """
+            <div style="
+                text-align:center;
+                padding:45px 0 20px;
+            ">
+                <div style="
+                    font-size:48px;
+                    margin-bottom:10px;
+                ">🌿</div>
 
-    st.caption(
-        "Secure workspace for multimodal data annotation and quality control."
-    )
+                <div style="
+                    font-size:30px;
+                    font-weight:800;
+                    color:#15271d;
+                ">
+                    SEED Lab
+                </div>
 
-    st.divider()
-
-    login_tab, register_tab = st.tabs(
-        [
-            "Login",
-            "Create Account",
-        ]
-    )
-
-    # ========================================================
-    # LOGIN
-    # ========================================================
-
-    with login_tab:
-
-        st.subheader(
-            "Welcome back"
+                <div style="
+                    color:#718078;
+                    margin-top:6px;
+                    font-size:14px;
+                ">
+                    Multimodal Data Quality Studio
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
 
-        email = st.text_input(
-            "Email",
-            placeholder="you@example.com",
-            key="login_email",
+        tab_login, tab_register = st.tabs(
+            ["Sign In", "Create Account"]
         )
 
-        password = st.text_input(
-            "Password",
-            type="password",
-            placeholder="Enter your password",
-            key="login_password",
-        )
+        # ====================================================
+        # LOGIN
+        # ====================================================
 
-        if st.button(
-            "Login",
-            type="primary",
-            use_container_width=True,
-        ):
+        with tab_login:
 
-            if not email or not password:
+            st.markdown("### Welcome back")
+            st.caption("Sign in to your SEED Lab workspace.")
 
-                st.warning(
-                    "Please enter your email and password."
-                )
+            email = st.text_input(
+                "Email",
+                placeholder="you@example.com",
+                key="login_email",
+            )
 
-            else:
+            password = st.text_input(
+                "Password",
+                type="password",
+                key="login_password",
+            )
 
-                user = authenticate_user(
-                    email,
-                    password,
-                )
+            if st.button(
+                "Sign In →",
+                use_container_width=True,
+                type="primary",
+            ):
 
-                if user:
-
-                    st.session_state.logged_in = True
-                    st.session_state.user_id = user["id"]
-                    st.session_state.auth_page = "Login"
-
-                    st.success(
-                        "Login successful."
-                    )
-
-                    time.sleep(0.5)
-
-                    st.rerun()
+                if not email or not password:
+                    st.error("Please enter your email and password.")
 
                 else:
 
-                    st.error(
-                        "Invalid email or password."
+                    user = authenticate_user(
+                        email,
+                        password,
                     )
 
-    # ========================================================
-    # REGISTER
-    # ========================================================
+                    if user:
 
-    with register_tab:
+                        st.session_state.logged_in = True
+                        st.session_state.user_id = user["id"]
+                        st.session_state.page = "dashboard"
+                        st.session_state.settings_open = False
 
-        st.subheader(
-            "Create your SEED Lab account"
-        )
+                        st.rerun()
 
-        name = st.text_input(
-            "Full name",
-            placeholder="Enter your name",
-            key="register_name",
-        )
+                    else:
+                        st.error("Incorrect email or password.")
 
-        email = st.text_input(
-            "Email address",
-            placeholder="you@example.com",
-            key="register_email",
-        )
+        # ====================================================
+        # REGISTER
+        # ====================================================
 
-        password = st.text_input(
-            "Create password",
-            type="password",
-            placeholder="Create a secure password",
-            key="register_password",
-        )
+        with tab_register:
 
-        confirm_password = st.text_input(
-            "Confirm password",
-            type="password",
-            placeholder="Re-enter your password",
-            key="register_confirm_password",
-        )
-
-        profile_picture = st.file_uploader(
-            "Profile picture (optional)",
-            type=[
-                "jpg",
-                "jpeg",
-                "png",
-                "webp",
-            ],
-            key="register_profile_picture",
-        )
-
-        if profile_picture:
-
-            st.image(
-                profile_picture,
-                width=140,
+            st.markdown("### Create your account")
+            st.caption(
+                "Create a secure workspace for your data-quality tasks."
             )
 
-        if st.button(
-            "Create Account",
-            type="primary",
-            use_container_width=True,
-        ):
+            name = st.text_input(
+                "Full name",
+                placeholder="Ashwak K",
+                key="register_name",
+            )
 
-            if not name.strip():
+            email = st.text_input(
+                "Email",
+                placeholder="you@example.com",
+                key="register_email",
+            )
 
-                st.warning(
-                    "Please enter your name."
-                )
+            password = st.text_input(
+                "Create password",
+                type="password",
+                key="register_password",
+            )
 
-            elif not email.strip():
+            confirm = st.text_input(
+                "Confirm password",
+                type="password",
+                key="register_confirm",
+            )
 
-                st.warning(
-                    "Please enter your email."
-                )
+            profile = st.file_uploader(
+                "Profile picture (optional)",
+                type=["png", "jpg", "jpeg"],
+                key="register_profile",
+            )
 
-            elif "@" not in email:
+            if st.button(
+                "Create Account →",
+                use_container_width=True,
+                type="primary",
+            ):
 
-                st.warning(
-                    "Please enter a valid email address."
-                )
+                if not name or not email or not password:
+                    st.error("Please complete all required fields.")
 
-            elif len(password) < 8:
+                elif password != confirm:
+                    st.error("Passwords do not match.")
 
-                st.warning(
-                    "Password must contain at least 8 characters."
-                )
+                elif len(password) < 8:
+                    st.error(
+                        "Password must contain at least 8 characters."
+                    )
 
-            elif password != confirm_password:
+                elif not re.match(
+                    r"^[^@\s]+@[^@\s]+\.[^@\s]+$",
+                    email,
+                ):
+                    st.error("Please enter a valid email address.")
 
-                st.error(
-                    "Passwords do not match."
-                )
+                else:
 
-            else:
+                    picture_path = None
 
-                saved_picture = None
+                    if profile:
 
-                if profile_picture:
-
-                    extension = (
-                        Path(
-                            profile_picture.name
+                        extension = Path(
+                            profile.name
                         ).suffix.lower()
-                    )
 
-                    filename = (
-                        f"pending_{int(time.time())}{extension}"
-                    )
-
-                    picture_path = (
-                        PROFILE_DIR / filename
-                    )
-
-                    with open(
-                        picture_path,
-                        "wb",
-                    ) as file:
-
-                        file.write(
-                            profile_picture.getvalue()
+                        filename = (
+                            f"user_{secrets.token_hex(8)}"
+                            f"{extension}"
                         )
 
-                    saved_picture = str(
-                        picture_path
+                        picture_path = str(
+                            PROFILE_DIR / filename
+                        )
+
+                        with open(
+                            picture_path,
+                            "wb",
+                        ) as f:
+                            f.write(profile.getbuffer())
+
+                    user_id = create_user(
+                        name.strip(),
+                        email.strip(),
+                        password,
+                        picture_path,
                     )
 
-                user_id, error = create_user(
-                    name,
-                    email,
-                    password,
-                    saved_picture,
-                )
+                    if user_id:
 
-                if error:
+                        st.success(
+                            "Account created successfully. "
+                            "Please sign in."
+                        )
 
-                    if saved_picture:
+                    else:
 
-                        try:
-                            os.remove(
-                                saved_picture
-                            )
-                        except Exception:
-                            pass
+                        if picture_path and os.path.exists(
+                            picture_path
+                        ):
+                            os.remove(picture_path)
 
-                    st.error(error)
-
-                else:
-
-                    st.success(
-                        "Account created successfully. You can now log in."
-                    )
+                        st.error(
+                            "An account with this email already exists."
+                        )
 
 
 # ============================================================
-# SHOW LOGIN IF NOT AUTHENTICATED
+# LOGOUT
 # ============================================================
 
-if not st.session_state.logged_in:
-
-    authentication_screen()
-
-    st.stop()
-
-
-# ============================================================
-# CURRENT USER
-# ============================================================
-
-current_user = get_user(
-    st.session_state.user_id
-)
-
-if not current_user:
+def logout():
 
     st.session_state.logged_in = False
     st.session_state.user_id = None
+    st.session_state.page = "dashboard"
+    st.session_state.settings_open = False
+    st.session_state.image_result = None
+    st.session_state.audio_result = None
+    st.session_state.manifest = []
 
     st.rerun()
-
-
-# ============================================================
-# PROFILE IMAGE HELPER
-# ============================================================
-
-def display_profile_picture(
-    user,
-    width=80,
-):
-
-    picture = user.get(
-        "profile_picture"
-    )
-
-    if picture and os.path.exists(
-        picture
-    ):
-
-        try:
-
-            st.image(
-                picture,
-                width=width,
-            )
-
-            return
-
-        except Exception:
-            pass
-
-    st.write("👤")
 
 
 # ============================================================
 # SIDEBAR
 # ============================================================
 
-with st.sidebar:
+def render_sidebar(user):
 
-    st.title(
-        "🌿 SEED Lab"
-    )
+    with st.sidebar:
 
-    st.caption(
-        "Multimodal Data QC Studio"
-    )
+        st.markdown(
+            """
+            <div class="sidebar-brand">
 
-    st.divider()
+                <div class="sidebar-logo">🌿</div>
 
-    display_profile_picture(
-        current_user,
-        width=75,
-    )
+                <div class="sidebar-title">
+                    SEED LAB
+                </div>
 
-    st.write(
-        f"**{current_user['name']}**"
-    )
+                <div class="sidebar-subtitle">
+                    Multimodal Data QC Studio
+                </div>
 
-    st.caption(
-        current_user["email"]
-    )
-
-    st.divider()
-
-    st.subheader(
-        "Studio"
-    )
-
-    selected_mode = st.radio(
-        "Workspace",
-        [
-            "Image Data Studio",
-            "Audio Data Studio",
-            "Auditor Console",
-        ],
-        index=[
-            "Image Data Studio",
-            "Audio Data Studio",
-            "Auditor Console",
-        ].index(
-            st.session_state.app_mode
-        ),
-        label_visibility="collapsed",
-    )
-
-    st.session_state.app_mode = selected_mode
-
-    st.divider()
-
-    # ========================================================
-    # SETTINGS AT BOTTOM LEFT
-    # ========================================================
-
-    # =========================
-# SETTINGS
-# =========================
-
-if "settings_open" not in st.session_state:
-    st.session_state.settings_open = False
-
-st.divider()
-
-# Main Settings button
-if st.button(
-    "⚙️ Settings",
-    use_container_width=True,
-):
-    st.session_state.settings_open = not st.session_state.settings_open
-    st.rerun()
-
-
-# Show options ONLY when Settings is clicked
-if st.session_state.settings_open:
-
-    settings_choice = st.radio(
-        "Settings",
-        [
-            "👤 Profile",
-            "🔐 Account",
-        ],
-        label_visibility="collapsed",
-    )
-
-    # -------------------------
-    # PROFILE
-    # -------------------------
-    if settings_choice == "👤 Profile":
-
-        if st.button(
-            "Open Profile",
-            use_container_width=True,
-        ):
-            st.session_state.page = "profile"
-            st.rerun()
-
-
-    # -------------------------
-    # ACCOUNT
-    # -------------------------
-    if settings_choice == "🔐 Account":
-
-        if st.button(
-            "Logout",
-            use_container_width=True,
-        ):
-            st.session_state.logged_in = False
-            st.session_state.user_id = None
-            st.session_state.image_result = None
-            st.session_state.audio_result = None
-            st.session_state.manifest = []
-
-            st.rerun()
-
-
-st.caption("SEED Lab Multimodal Studio")
-st.caption("Secure user workspace")
-
-
-# ============================================================
-# PROFILE / SETTINGS PAGE
-# ============================================================
-
-if st.session_state.settings_open:
-
-    st.title(
-        "Profile & Settings"
-    )
-
-    st.caption(
-        "Manage your personal profile and account settings."
-    )
-
-    if st.button(
-        "← Back to Dashboard"
-    ):
-
-        st.session_state.settings_open = False
-
-        st.rerun()
-
-    st.divider()
-
-    profile_tab, account_tab = st.tabs(
-        [
-            "Profile",
-            "Account Security",
-        ]
-    )
-
-    # ========================================================
-    # PROFILE
-    # ========================================================
-
-    with profile_tab:
-
-        st.subheader(
-            "Your Profile"
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
 
-        left, right = st.columns(
-            [1, 2]
-        )
+        # USER CARD
 
-        with left:
+        picture = user.get("profile_picture")
 
-            display_profile_picture(
-                current_user,
-                width=180,
-            )
-
-        with right:
-
-            st.write(
-                f"**Email:** {current_user['email']}"
-            )
-
-            st.write(
-                f"**Account created:** {current_user['created_at']}"
-            )
-
-        st.divider()
-
-        new_name = st.text_input(
-            "Name",
-            value=current_user["name"],
-        )
-
-        new_picture = st.file_uploader(
-            "Change profile picture",
-            type=[
-                "jpg",
-                "jpeg",
-                "png",
-                "webp",
-            ],
-        )
-
-        if new_picture:
+        if picture and os.path.exists(picture):
 
             st.image(
-                new_picture,
-                width=180,
+                picture,
+                width=54,
             )
+
+        st.markdown(
+            f"""
+            <div class="user-card">
+
+                <div class="user-name">
+                    {user["name"]}
+                </div>
+
+                <div class="user-email">
+                    {user["email"]}
+                </div>
+
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        # STUDIO
+
+        st.markdown(
+            '<div class="sidebar-section">WORKSPACE</div>',
+            unsafe_allow_html=True,
+        )
 
         if st.button(
-            "Save Profile",
-            type="primary",
+            "▣  Overview",
+            use_container_width=True,
+        ):
+            st.session_state.page = "dashboard"
+            st.session_state.studio = "dashboard"
+            st.rerun()
+
+        if st.button(
+            "◈  Image Data Studio",
+            use_container_width=True,
+        ):
+            st.session_state.page = "studio"
+            st.session_state.studio = "image"
+            st.rerun()
+
+        if st.button(
+            "◉  Audio Data Studio",
+            use_container_width=True,
+        ):
+            st.session_state.page = "studio"
+            st.session_state.studio = "audio"
+            st.rerun()
+
+        if st.button(
+            "◫  Auditor Console",
+            use_container_width=True,
+        ):
+            st.session_state.page = "auditor"
+            st.rerun()
+
+        st.markdown("---")
+
+        # ====================================================
+        # SETTINGS
+        # ====================================================
+
+        if st.button(
+            "⚙️  Settings",
+            use_container_width=True,
         ):
 
-            picture_path = None
-
-            if new_picture:
-
-                extension = (
-                    Path(
-                        new_picture.name
-                    ).suffix.lower()
-                )
-
-                filename = (
-                    f"user_{current_user['id']}_{int(time.time())}{extension}"
-                )
-
-                picture_path = (
-                    PROFILE_DIR / filename
-                )
-
-                with open(
-                    picture_path,
-                    "wb",
-                ) as file:
-
-                    file.write(
-                        new_picture.getvalue()
-                    )
-
-                picture_path = str(
-                    picture_path
-                )
-
-            update_user(
-                current_user["id"],
-                new_name,
-                picture_path,
+            st.session_state.settings_open = (
+                not st.session_state.settings_open
             )
-
-            st.success(
-                "Profile updated successfully."
-            )
-
-            time.sleep(0.5)
 
             st.rerun()
 
-    # ========================================================
-    # ACCOUNT SECURITY
-    # ========================================================
+        # ONLY SHOW AFTER SETTINGS IS CLICKED
 
-    with account_tab:
+        if st.session_state.settings_open:
 
-        st.subheader(
-            "Change Password"
-        )
+            st.markdown(
+                '<div class="sidebar-section">SETTINGS</div>',
+                unsafe_allow_html=True,
+            )
 
-        new_password = st.text_input(
-            "New password",
-            type="password",
-        )
+            if st.button(
+                "👤  Profile",
+                use_container_width=True,
+            ):
 
-        confirm_new_password = st.text_input(
-            "Confirm new password",
-            type="password",
-        )
+                st.session_state.page = "profile"
+                st.rerun()
+
+            if st.button(
+                "🔐  Account",
+                use_container_width=True,
+            ):
+
+                st.session_state.page = "account"
+                st.rerun()
+
+        st.markdown("---")
 
         if st.button(
-            "Change Password",
-            type="primary",
+            "↪  Sign Out",
+            use_container_width=True,
         ):
-
-            if len(new_password) < 8:
-
-                st.warning(
-                    "Password must contain at least 8 characters."
-                )
-
-            elif new_password != confirm_new_password:
-
-                st.error(
-                    "Passwords do not match."
-                )
-
-            else:
-
-                change_password(
-                    current_user["id"],
-                    new_password,
-                )
-
-                st.success(
-                    "Password changed successfully."
-                )
-
-    st.stop()
+            logout()
 
 
 # ============================================================
-# GEMINI CONFIG
+# GEMINI
 # ============================================================
 
-API_KEY = st.secrets.get(
-    "GEMINI_API_KEY",
-    "",
-)
+def get_gemini_client():
 
-if API_KEY:
+    api_key = None
 
-    client = genai.Client(
-        api_key=API_KEY
+    try:
+        api_key = st.secrets["GEMINI_API_KEY"]
+    except Exception:
+        pass
+
+    if not api_key:
+        api_key = os.getenv("GEMINI_API_KEY")
+
+    if not api_key:
+        return None
+
+    return genai.Client(
+        api_key=api_key
     )
-
-else:
-
-    client = None
 
 
 PRIMARY_MODEL = "gemini-3.8-flash"
 
 FALLBACK_MODELS = [
+    "gemini-3.7-flash",
     "gemini-3.6-flash",
     "gemini-3.5-flash-lite",
-    "gemini-3.5-flash",
 ]
-
-
-# ============================================================
-# GEMINI HELPERS
-# ============================================================
-
-def retryable(error):
-
-    message = str(error).lower()
-
-    words = [
-        "503",
-        "unavailable",
-        "high demand",
-        "overloaded",
-        "429",
-        "rate limit",
-        "resource exhausted",
-        "temporarily",
-        "timeout",
-    ]
-
-    return any(
-        word in message
-        for word in words
-    )
 
 
 def response_text(response):
 
-    if response is None:
+    try:
+        return response.text or ""
+    except Exception:
         return ""
 
-    try:
 
-        text = getattr(
-            response,
-            "text",
-            None,
+def clean_json(text):
+
+    text = text.strip()
+
+    if text.startswith("```"):
+        text = re.sub(
+            r"^```(?:json)?",
+            "",
+            text,
+            flags=re.IGNORECASE,
         )
 
-        if text:
-            return str(text).strip()
-
-    except Exception:
-        pass
-
-    try:
-
-        candidates = getattr(
-            response,
-            "candidates",
-            [],
+        text = re.sub(
+            r"```$",
+            "",
+            text,
         )
 
-        if candidates:
-
-            content = getattr(
-                candidates[0],
-                "content",
-                None,
-            )
-
-            if content:
-
-                parts = getattr(
-                    content,
-                    "parts",
-                    [],
-                )
-
-                output = []
-
-                for part in parts:
-
-                    text_part = getattr(
-                        part,
-                        "text",
-                        None,
-                    )
-
-                    if text_part:
-
-                        output.append(
-                            str(text_part)
-                        )
-
-                return "\n".join(
-                    output
-                ).strip()
-
-    except Exception:
-        pass
-
-    return ""
+    return text.strip()
 
 
 def parse_json(text):
 
-    if not text:
-        return None
-
-    cleaned = text.strip()
-
-    cleaned = re.sub(
-        r"^```(?:json)?\s*",
-        "",
-        cleaned,
-        flags=re.IGNORECASE,
-    )
-
-    cleaned = re.sub(
-        r"\s*```$",
-        "",
-        cleaned,
-    )
+    text = clean_json(text)
 
     try:
-
-        return json.loads(
-            cleaned
-        )
-
+        return json.loads(text)
     except Exception:
         pass
 
-    start = cleaned.find(
-        "{"
+    match = re.search(
+        r"\{.*\}",
+        text,
+        re.DOTALL,
     )
 
-    end = cleaned.rfind(
-        "}"
-    )
-
-    if start != -1 and end != -1:
+    if match:
 
         try:
-
-            return json.loads(
-                cleaned[
-                    start:end + 1
-                ]
-            )
-
+            return json.loads(match.group(0))
         except Exception:
             pass
 
-    return None
-
-
-def text_value(
-    data,
-    key,
-    default="",
-):
-
-    if not isinstance(
-        data,
-        dict,
-    ):
-
-        return default
-
-    value = data.get(
-        key,
-        default,
-    )
-
-    if value is None:
-        return default
-
-    return str(value).strip()
-
-
-def description_lines(data):
-
-    if not isinstance(
-        data,
-        dict,
-    ):
-
-        return []
-
-    value = data.get(
-        "description_lines",
-        [],
-    )
-
-    if isinstance(
-        value,
-        list,
-    ):
-
-        return [
-            str(item).strip()
-            for item in value
-            if str(item).strip()
-        ]
-
-    if isinstance(
-        value,
-        str,
-    ):
-
-        return [
-            line.strip()
-            for line in value.splitlines()
-            if line.strip()
-        ]
-
-    return []
-
-
-def confidence(data):
-
-    if not isinstance(
-        data,
-        dict,
-    ):
-
-        return None
-
-    value = data.get(
-        "confidence"
-    )
-
-    if value is None:
-        return None
-
-    try:
-
-        number = float(value)
-
-        if number <= 1:
-            number *= 100
-
-        return max(
-            0,
-            min(100, number),
-        )
-
-    except Exception:
-
-        return None
-
-
-def json_config():
-
-    return types.GenerateContentConfig(
-        temperature=0.2,
-        response_mime_type="application/json",
-    )
+    return {}
 
 
 def generate_with_fallback(
-    contents
+    client,
+    contents,
+    config=None,
 ):
 
-    if client is None:
-
-        return (
-            None,
-            None,
-            "GEMINI_API_KEY is not configured.",
-        )
-
     models = [
-        PRIMARY_MODEL
-    ] + FALLBACK_MODELS
+        PRIMARY_MODEL,
+        *FALLBACK_MODELS,
+    ]
 
-    last_error = None
+    errors = []
 
-    for model_index, model in enumerate(
-        models
-    ):
+    for model in models:
 
         for attempt in range(2):
 
@@ -1458,1046 +1044,1311 @@ def generate_with_fallback(
                 response = client.models.generate_content(
                     model=model,
                     contents=contents,
-                    config=json_config(),
+                    config=config,
                 )
 
-                if response_text(
-                    response
-                ):
+                text = response_text(response)
 
-                    return (
-                        response,
-                        model,
-                        None,
-                    )
+                if text.strip():
+                    return text, model, None
 
-                last_error = (
-                    "Gemini returned an empty response."
+            except Exception as e:
+
+                errors.append(
+                    f"{model}: {str(e)}"
                 )
 
-            except Exception as error:
+                time.sleep(
+                    1.5 * (attempt + 1)
+                )
 
-                last_error = str(error)
+    return "", None, " | ".join(errors[-4:])
 
-                if not retryable(error):
-                    break
 
-                if attempt == 0:
-                    time.sleep(2)
+# ============================================================
+# DESCRIPTION LINES
+# ============================================================
 
-        if model_index < len(models) - 1:
-            time.sleep(1)
+def normalize_description_lines(
+    value,
+    count,
+):
 
-    return (
-        None,
-        None,
-        last_error or "Gemini request failed.",
-    )
+    if isinstance(value, list):
 
+        lines = [
+            str(x).strip()
+            for x in value
+            if str(x).strip()
+        ]
+
+    else:
+
+        lines = [
+            x.strip(" -•0123456789.")
+            for x in str(value).splitlines()
+            if x.strip()
+        ]
+
+    lines = lines[:count]
+
+    while len(lines) < count:
+        lines.append("No additional description available.")
+
+    return lines
+
+
+# ============================================================
+# MANIFEST
+# ============================================================
 
 def add_manifest(
-    mode,
     filename,
-    requested_lines,
-    actual_lines,
-    model,
+    media_type,
+    status,
+    confidence,
 ):
 
     st.session_state.manifest.append(
         {
-            "Timestamp": time.strftime(
+            "Timestamp": datetime.now().strftime(
                 "%Y-%m-%d %H:%M:%S"
             ),
-            "User": current_user["email"],
-            "Mode": mode,
+            "User": get_user(
+                st.session_state.user_id
+            )["email"],
             "File": filename,
-            "Requested Lines": requested_lines,
-            "Actual Lines": actual_lines,
-            "QC": (
-                "PASS"
-                if requested_lines == actual_lines
-                else "FAIL"
-            ),
-            "Model": model or "Unknown",
+            "Type": media_type,
+            "Status": status,
+            "Confidence": confidence,
         }
     )
 
 
 # ============================================================
-# MAIN DASHBOARD HEADER
+# DASHBOARD
 # ============================================================
 
-st.title(
-    "SEED Lab Multimodal Studio"
-)
+def dashboard_page(user):
 
-st.caption(
-    f"Welcome, {current_user['name']} • Unified multimodal data annotation and quality-control workspace"
-)
-
-st.divider()
-
-
-# ============================================================
-# API WARNING
-# ============================================================
-
-if not API_KEY:
-
-    st.warning(
-        "GEMINI_API_KEY is not configured. "
-        "Add it to Streamlit Secrets before running AI analysis."
+    st.markdown(
+        '<div class="eyebrow">SEED LAB</div>',
+        unsafe_allow_html=True,
     )
 
-
-# ============================================================
-# IMAGE DATA STUDIO
-# ============================================================
-
-if st.session_state.app_mode == "Image Data Studio":
-
-    st.header(
-        "Image Data Studio"
+    st.markdown(
+        '<div class="page-title">'
+        'Multimodal Data Quality Studio'
+        '</div>',
+        unsafe_allow_html=True,
     )
 
-    st.caption(
-        "OCR • Translation • Visual Description • Quality Control"
+    st.markdown(
+        f"""
+        <div class="page-subtitle">
+            Welcome back, {user["name"]}.
+            Your unified workspace for annotation and quality control.
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
 
-    upload_col, lines_col = st.columns(
-        [2, 1]
+    total = len(st.session_state.manifest)
+
+    passed = len(
+        [
+            x for x in st.session_state.manifest
+            if x["Status"] == "PASS"
+        ]
     )
 
-    with upload_col:
+    review = total - passed
 
-        image_file = st.file_uploader(
-            "Upload image",
-            type=[
-                "jpg",
-                "jpeg",
-                "png",
-                "webp",
-                "bmp",
-            ],
-            key="image_uploader",
+    # METRICS
+
+    c1, c2, c3 = st.columns(3)
+
+    with c1:
+        st.markdown(
+            f"""
+            <div class="metric-card">
+                <div class="metric-label">Files Processed</div>
+                <div class="metric-value">{total}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
 
-    with lines_col:
-
-        image_description_count = st.number_input(
-            "Description lines required",
-            min_value=1,
-            max_value=20,
-            value=7,
-            step=1,
-            key="image_description_count",
+    with c2:
+        st.markdown(
+            f"""
+            <div class="metric-card">
+                <div class="metric-label">QC Passed</div>
+                <div class="metric-value metric-green">
+                    {passed}
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
 
-    if image_file:
+    with c3:
+        st.markdown(
+            f"""
+            <div class="metric-card">
+                <div class="metric-label">Needs Review</div>
+                <div class="metric-value">
+                    {review}
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
-        image_bytes = image_file.getvalue()
+    st.markdown("<br>", unsafe_allow_html=True)
 
-        try:
+    # STUDIO CARDS
 
-            image = Image.open(
-                io.BytesIO(
-                    image_bytes
-                )
+    st.markdown(
+        """
+        <div class="eyebrow">WORKSPACES</div>
+        <div style="
+            font-size:21px;
+            font-weight:800;
+            color:#17281f;
+            margin-bottom:16px;
+        ">
+            Choose your studio
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    c1, c2 = st.columns(2)
+
+    with c1:
+
+        st.markdown(
+            """
+            <div class="studio-card">
+
+                <div class="studio-icon">🖼️</div>
+
+                <div class="studio-title">
+                    Image Data Studio
+                </div>
+
+                <div class="studio-description">
+                    OCR, translation, visual description
+                    and automated quality-control checks.
+                </div>
+
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        if st.button(
+            "Open Image Studio →",
+            use_container_width=True,
+        ):
+
+            st.session_state.page = "studio"
+            st.session_state.studio = "image"
+            st.rerun()
+
+    with c2:
+
+        st.markdown(
+            """
+            <div class="studio-card">
+
+                <div class="studio-icon">🎧</div>
+
+                <div class="studio-title">
+                    Audio Data Studio
+                </div>
+
+                <div class="studio-description">
+                    Transcription, translation, audio
+                    description and automated QC.
+                </div>
+
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        if st.button(
+            "Open Audio Studio →",
+            use_container_width=True,
+        ):
+
+            st.session_state.page = "studio"
+            st.session_state.studio = "audio"
+            st.rerun()
+
+    # RECENT ACTIVITY
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    st.markdown(
+        """
+        <div class="eyebrow">ACTIVITY</div>
+        <div style="
+            font-size:21px;
+            font-weight:800;
+            color:#17281f;
+            margin-bottom:14px;
+        ">
+            Recent processing
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    if st.session_state.manifest:
+
+        import pandas as pd
+
+        df = pd.DataFrame(
+            st.session_state.manifest
+        )
+
+        st.dataframe(
+            df.tail(8),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    else:
+
+        st.info(
+            "No files have been processed yet."
+        )
+
+
+# ============================================================
+# IMAGE STUDIO
+# ============================================================
+
+def image_studio():
+
+    st.markdown(
+        '<div class="eyebrow">IMAGE WORKSPACE</div>',
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        '<div class="page-title">Image Data Studio</div>',
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        """
+        <div class="page-subtitle">
+            OCR · Translation · Visual Description · Quality Control
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    uploaded = st.file_uploader(
+        "Upload image",
+        type=[
+            "jpg",
+            "jpeg",
+            "png",
+            "webp",
+            "bmp",
+        ],
+        label_visibility="collapsed",
+    )
+
+    lines = st.number_input(
+        "Description lines required",
+        min_value=1,
+        max_value=20,
+        value=5,
+        step=1,
+    )
+
+    if uploaded:
+
+        left, right = st.columns([1, 1.2])
+
+        with left:
+
+            image = Image.open(uploaded)
+
+            st.image(
+                image,
+                use_container_width=True,
             )
 
-        except Exception as error:
-
-            st.error(
-                f"Could not open image: {error}"
+            st.caption(
+                f"{uploaded.name} • "
+                f"{uploaded.size / 1024:.1f} KB"
             )
 
-            image = None
-
-        if image:
-
-            st.divider()
-
-            preview_col, info_col = st.columns(
-                [1.4, 1]
-            )
-
-            with preview_col:
-
-                st.subheader(
-                    "Image Preview"
-                )
-
-                st.image(
-                    image,
-                    use_container_width=True,
-                )
-
-            with info_col:
-
-                st.subheader(
-                    "File Information"
-                )
-
-                st.metric(
-                    "File size",
-                    f"{len(image_bytes) / 1024:.1f} KB",
-                )
-
-                st.metric(
-                    "Resolution",
-                    f"{image.width} × {image.height}",
-                )
-
-                st.metric(
-                    "Description lines",
-                    image_description_count,
-                )
-
-            st.divider()
+        with right:
 
             if st.button(
-                "Analyze Image",
+                "Analyze Image →",
                 type="primary",
                 use_container_width=True,
             ):
 
-                if not API_KEY:
+                client = get_gemini_client()
+
+                if not client:
 
                     st.error(
-                        "Gemini API key is missing."
+                        "GEMINI_API_KEY is not configured."
                     )
 
                 else:
-
-                    prompt = f"""
-You are a professional multimodal data annotation and quality-control assistant.
-
-Analyze the uploaded image.
-
-Return ONLY valid JSON:
-
-{{
-  "ocr_text": "all clearly readable text",
-  "translation": "English translation of readable text",
-  "description_lines": [
-    "line 1",
-    "line 2"
-  ],
-  "confidence": 0.0
-}}
-
-Rules:
-
-1. description_lines MUST contain exactly {image_description_count} separate lines.
-2. Every line must contain useful visual information.
-3. Do not number the lines.
-4. Do not combine multiple lines.
-5. Extract readable text accurately.
-6. If no readable text exists, use an empty string.
-7. Translate extracted text into English.
-8. If translation is not applicable, use an empty string.
-9. confidence must be a number from 0 to 1.
-10. Return JSON only.
-"""
 
                     with st.spinner(
                         "Analyzing image..."
                     ):
 
-                        response, model_used, error = (
-                            generate_with_fallback(
-                                [
-                                    prompt,
-                                    image,
-                                ]
-                            )
-                        )
+                        prompt = f"""
+Analyze this image for a multimodal
+data-quality workflow.
 
-                    if error:
+Return ONLY valid JSON.
 
-                        st.error(
-                            f"Image analysis failed: {error}"
-                        )
-
-                    else:
-
-                        raw = response_text(
-                            response
-                        )
-
-                        result = parse_json(
-                            raw
-                        )
-
-                        if result is None:
-
-                            st.error(
-                                "Gemini response could not be parsed."
-                            )
-
-                            with st.expander(
-                                "Developer Response"
-                            ):
-
-                                st.code(
-                                    raw or "EMPTY RESPONSE"
-                                )
-
-                        else:
-
-                            st.session_state.image_result = {
-                                "data": result,
-                                "model": model_used,
-                                "filename": image_file.name,
-                            }
-
-                            add_manifest(
-                                "Image",
-                                image_file.name,
-                                image_description_count,
-                                len(
-                                    description_lines(
-                                        result
-                                    )
-                                ),
-                                model_used,
-                            )
-
-                            st.success(
-                                "Image analysis completed."
-                            )
-
-            # =================================================
-            # IMAGE RESULTS
-            # =================================================
-
-            if st.session_state.image_result:
-
-                result = (
-                    st.session_state.image_result
-                    .get(
-                        "data",
-                        {},
-                    )
-                )
-
-                ocr = text_value(
-                    result,
-                    "ocr_text",
-                )
-
-                translation = text_value(
-                    result,
-                    "translation",
-                )
-
-                lines = description_lines(
-                    result
-                )
-
-                conf = confidence(
-                    result
-                )
-
-                st.divider()
-
-                st.header(
-                    "Image Analysis Results"
-                )
-
-                c1, c2, c3 = st.columns(3)
-
-                with c1:
-
-                    st.metric(
-                        "OCR",
-                        (
-                            "Available"
-                            if ocr
-                            else "No text"
-                        ),
-                    )
-
-                with c2:
-
-                    st.metric(
-                        "Translation",
-                        (
-                            "Available"
-                            if translation
-                            else "N/A"
-                        ),
-                    )
-
-                with c3:
-
-                    st.metric(
-                        "Confidence",
-                        (
-                            f"{conf:.1f}%"
-                            if conf is not None
-                            else "Not supplied"
-                        ),
-                    )
-
-                left, right = st.columns(2)
-
-                with left:
-
-                    st.subheader(
-                        "OCR Text"
-                    )
-
-                    st.text_area(
-                        "OCR",
-                        value=(
-                            ocr
-                            if ocr
-                            else "No readable text detected."
-                        ),
-                        height=220,
-                        disabled=True,
-                        label_visibility="collapsed",
-                    )
-
-                with right:
-
-                    st.subheader(
-                        "Translation"
-                    )
-
-                    st.text_area(
-                        "Translation",
-                        value=(
-                            translation
-                            if translation
-                            else "No translation available."
-                        ),
-                        height=220,
-                        disabled=True,
-                        label_visibility="collapsed",
-                    )
-
-                st.divider()
-
-                st.subheader(
-                    f"AI Visual Description ({image_description_count} lines requested)"
-                )
-
-                for index, line in enumerate(
-                    lines,
-                    start=1,
-                ):
-
-                    st.write(
-                        f"**{index}.** {line}"
-                    )
-
-                st.divider()
-
-                st.subheader(
-                    "Quality Control"
-                )
-
-                actual_count = len(
-                    lines
-                )
-
-                q1, q2, q3 = st.columns(3)
-
-                with q1:
-
-                    if (
-                        actual_count
-                        == image_description_count
-                    ):
-
-                        st.success(
-                            f"Description count: PASS ({actual_count})"
-                        )
-
-                    else:
-
-                        st.error(
-                            f"Description count: FAIL ({actual_count}/{image_description_count})"
-                        )
-
-                with q2:
-
-                    if ocr:
-                        st.success(
-                            "OCR: PASS"
-                        )
-                    else:
-                        st.info(
-                            "OCR: No readable text"
-                        )
-
-                with q3:
-
-                    if translation:
-                        st.success(
-                            "Translation: PASS"
-                        )
-                    else:
-                        st.info(
-                            "Translation: N/A"
-                        )
-
-
-# ============================================================
-# AUDIO DATA STUDIO
-# ============================================================
-
-elif st.session_state.app_mode == "Audio Data Studio":
-
-    st.header(
-        "Audio Data Studio"
-    )
-
-    st.caption(
-        "Transcription • Translation • Audio Description • Quality Control"
-    )
-
-    upload_col, lines_col = st.columns(
-        [2, 1]
-    )
-
-    with upload_col:
-
-        audio_file = st.file_uploader(
-            "Upload audio",
-            type=[
-                "mp3",
-                "wav",
-                "m4a",
-                "aac",
-                "ogg",
-                "flac",
-            ],
-            key="audio_uploader",
-        )
-
-    with lines_col:
-
-        audio_description_count = st.number_input(
-            "Description lines required",
-            min_value=1,
-            max_value=20,
-            value=7,
-            step=1,
-            key="audio_description_count",
-        )
-
-    if audio_file:
-
-        audio_bytes = audio_file.getvalue()
-
-        st.divider()
-
-        a1, a2, a3 = st.columns(3)
-
-        with a1:
-
-            st.metric(
-                "File size",
-                f"{len(audio_bytes) / (1024 * 1024):.2f} MB",
-            )
-
-        with a2:
-
-            st.metric(
-                "Format",
-                audio_file.type or "Unknown",
-            )
-
-        with a3:
-
-            st.metric(
-                "Description lines",
-                audio_description_count,
-            )
-
-        st.subheader(
-            "Audio Preview"
-        )
-
-        st.audio(
-            audio_bytes,
-            format=audio_file.type,
-        )
-
-        st.divider()
-
-        if st.button(
-            "Analyze Audio",
-            type="primary",
-            use_container_width=True,
-        ):
-
-            if not API_KEY:
-
-                st.error(
-                    "Gemini API key is missing."
-                )
-
-            else:
-
-                uploaded_file = None
-
-                with st.spinner(
-                    "Uploading audio..."
-                ):
-
-                    try:
-
-                        uploaded_file = client.files.upload(
-                            file=io.BytesIO(
-                                audio_bytes
-                            ),
-                            config=types.UploadFileConfig(
-                                mime_type=audio_file.type
-                            ),
-                        )
-
-                    except Exception as error:
-
-                        st.error(
-                            f"Audio upload failed: {error}"
-                        )
-
-                if uploaded_file:
-
-                    prompt = f"""
-You are a professional multimodal data annotation and quality-control assistant.
-
-Analyze the uploaded audio.
-
-Return ONLY valid JSON:
+Required schema:
 
 {{
-  "transcript": "complete understandable speech transcription",
-  "translation": "English translation of spoken content",
+  "ocr": "detected text",
+  "translation": "English translation",
   "description_lines": [
     "line 1",
     "line 2"
   ],
-  "confidence": 0.0
+  "confidence": 0
 }}
 
-Rules:
+IMPORTANT:
+Return exactly {lines} description lines.
 
-1. description_lines MUST contain exactly {audio_description_count} separate lines.
-2. Every line must contain useful audio information.
-3. Do not number the lines.
-4. Do not combine lines.
-5. Describe identifiable speech, sounds, environment, events or other useful audio information.
-6. transcript should contain understandable speech.
-7. If no understandable speech exists, use an empty string.
-8. translation should be English.
-9. If translation is not applicable, use an empty string.
-10. confidence must be a number from 0 to 1.
-11. Return JSON only.
+Describe only what is actually visible.
+Do not invent details.
+Confidence must be between 0 and 100.
 """
 
-                    with st.spinner(
-                        "Transcribing and analyzing audio..."
-                    ):
+                        config = types.GenerateContentConfig(
+                            temperature=0.2,
+                            response_mime_type="application/json",
+                        )
 
-                        response, model_used, error = (
+                        text, model, error = (
                             generate_with_fallback(
+                                client,
                                 [
+                                    image,
                                     prompt,
-                                    uploaded_file,
-                                ]
+                                ],
+                                config,
                             )
                         )
 
-                    if error:
-
-                        st.error(
-                            f"Audio analysis failed: {error}"
-                        )
-
-                    else:
-
-                        raw = response_text(
-                            response
-                        )
-
-                        result = parse_json(
-                            raw
-                        )
-
-                        if result is None:
+                        if error:
 
                             st.error(
-                                "Gemini response could not be parsed."
+                                "Gemini analysis failed."
                             )
 
                             with st.expander(
-                                "Developer Response"
+                                "Technical details"
                             ):
-
-                                st.code(
-                                    raw or "EMPTY RESPONSE"
-                                )
+                                st.code(error)
 
                         else:
 
-                            st.session_state.audio_result = {
-                                "data": result,
-                                "model": model_used,
-                                "filename": audio_file.name,
+                            result = parse_json(text)
+
+                            description = (
+                                normalize_description_lines(
+                                    result.get(
+                                        "description_lines",
+                                        [],
+                                    ),
+                                    int(lines),
+                                )
+                            )
+
+                            confidence = result.get(
+                                "confidence",
+                                0,
+                            )
+
+                            try:
+                                confidence = float(
+                                    confidence
+                                )
+                            except Exception:
+                                confidence = 0
+
+                            ocr = result.get(
+                                "ocr",
+                                "",
+                            )
+
+                            translation = result.get(
+                                "translation",
+                                "",
+                            )
+
+                            status = (
+                                "PASS"
+                                if confidence >= 80
+                                and ocr
+                                else "REVIEW"
+                            )
+
+                            st.session_state.image_result = {
+                                "ocr": ocr,
+                                "translation": translation,
+                                "description": description,
+                                "confidence": confidence,
+                                "status": status,
+                                "model": model,
                             }
 
                             add_manifest(
-                                "Audio",
-                                audio_file.name,
-                                audio_description_count,
-                                len(
-                                    description_lines(
-                                        result
-                                    )
-                                ),
-                                model_used,
+                                uploaded.name,
+                                "Image",
+                                status,
+                                confidence,
                             )
 
-                            st.success(
-                                "Audio analysis completed."
-                            )
+                            st.rerun()
 
-    # ========================================================
-    # AUDIO RESULTS
-    # ========================================================
+    # RESULTS
 
-    if st.session_state.audio_result:
+    result = st.session_state.image_result
 
-        result = (
-            st.session_state.audio_result
-            .get(
-                "data",
-                {},
-            )
-        )
-
-        transcript = text_value(
-            result,
-            "transcript",
-        )
-
-        translation = text_value(
-            result,
-            "translation",
-        )
-
-        lines = description_lines(
-            result
-        )
-
-        conf = confidence(
-            result
-        )
+    if result:
 
         st.divider()
 
-        st.header(
-            "Audio Analysis Results"
+        st.markdown(
+            '<div class="eyebrow">ANALYSIS RESULT</div>',
+            unsafe_allow_html=True,
         )
 
-        c1, c2, c3 = st.columns(3)
+        c1, c2 = st.columns(2)
 
         with c1:
 
-            st.metric(
-                "Transcript",
-                (
-                    "Available"
-                    if transcript
-                    else "No speech"
-                ),
+            st.markdown(
+                """
+                <div class="result-card">
+                    <div class="result-heading">
+                        OCR
+                    </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            st.write(
+                result["ocr"]
+                or "No text detected."
+            )
+
+            st.markdown("</div>", unsafe_allow_html=True)
+
+            st.markdown(
+                """
+                <div class="result-card">
+                    <div class="result-heading">
+                        English Translation
+                    </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            st.write(
+                result["translation"]
+                or "No translation available."
+            )
+
+            st.markdown("</div>", unsafe_allow_html=True)
+
+        with c2:
+
+            st.markdown(
+                """
+                <div class="result-card">
+                    <div class="result-heading">
+                        AI Description
+                    </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            for i, line in enumerate(
+                result["description"],
+                1,
+            ):
+
+                st.write(
+                    f"**{i:02d}**  {line}"
+                )
+
+            st.markdown("</div>", unsafe_allow_html=True)
+
+        status_class = (
+            "status-pass"
+            if result["status"] == "PASS"
+            else "status-review"
+        )
+
+        st.markdown(
+            f"""
+            <div class="{status_class}">
+                {"✓ QC PASSED" if result["status"] == "PASS"
+                 else "⚠ NEEDS REVIEW"}
+                &nbsp;&nbsp;|&nbsp;&nbsp;
+                Confidence: {result["confidence"]:.0f}%
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
+# ============================================================
+# AUDIO STUDIO
+# ============================================================
+
+def audio_studio():
+
+    st.markdown(
+        '<div class="eyebrow">AUDIO WORKSPACE</div>',
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        '<div class="page-title">Audio Data Studio</div>',
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        """
+        <div class="page-subtitle">
+            Transcription · Translation · Audio Description · QC
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    uploaded = st.file_uploader(
+        "Upload audio",
+        type=[
+            "mp3",
+            "wav",
+            "m4a",
+            "aac",
+            "ogg",
+            "flac",
+        ],
+        label_visibility="collapsed",
+    )
+
+    lines = st.number_input(
+        "Description lines required",
+        min_value=1,
+        max_value=20,
+        value=5,
+        step=1,
+    )
+
+    if uploaded:
+
+        st.audio(
+            uploaded,
+        )
+
+        st.caption(
+            f"{uploaded.name} • "
+            f"{uploaded.size / (1024 * 1024):.2f} MB"
+        )
+
+        if st.button(
+            "Analyze Audio →",
+            type="primary",
+            use_container_width=True,
+        ):
+
+            client = get_gemini_client()
+
+            if not client:
+
+                st.error(
+                    "GEMINI_API_KEY is not configured."
+                )
+
+            else:
+
+                with st.spinner(
+                    "Analyzing audio..."
+                ):
+
+                    try:
+
+                        audio_file = client.files.upload(
+                            file=uploaded,
+                            config=types.UploadFileConfig(
+                                mime_type=uploaded.type
+                            ),
+                        )
+
+                        prompt = f"""
+Analyze this audio for a multimodal
+data-quality workflow.
+
+Return ONLY valid JSON.
+
+Required schema:
+
+{{
+  "transcript": "full transcript",
+  "translation": "English translation",
+  "description_lines": [
+    "line 1",
+    "line 2"
+  ],
+  "confidence": 0
+}}
+
+IMPORTANT:
+Return exactly {lines} description lines.
+
+For the description, summarize the audible
+content, speech, sounds, environment,
+music or relevant audio events.
+
+Do not invent sounds that cannot be supported.
+Confidence must be between 0 and 100.
+"""
+
+                        config = types.GenerateContentConfig(
+                            temperature=0.2,
+                            response_mime_type="application/json",
+                        )
+
+                        text, model, error = (
+                            generate_with_fallback(
+                                client,
+                                [
+                                    audio_file,
+                                    prompt,
+                                ],
+                                config,
+                            )
+                        )
+
+                        if error:
+
+                            st.error(
+                                "Audio analysis failed."
+                            )
+
+                            with st.expander(
+                                "Technical details"
+                            ):
+                                st.code(error)
+
+                        else:
+
+                            result = parse_json(text)
+
+                            transcript = result.get(
+                                "transcript",
+                                "",
+                            )
+
+                            translation = result.get(
+                                "translation",
+                                "",
+                            )
+
+                            description = (
+                                normalize_description_lines(
+                                    result.get(
+                                        "description_lines",
+                                        [],
+                                    ),
+                                    int(lines),
+                                )
+                            )
+
+                            confidence = result.get(
+                                "confidence",
+                                0,
+                            )
+
+                            try:
+                                confidence = float(
+                                    confidence
+                                )
+                            except Exception:
+                                confidence = 0
+
+                            status = (
+                                "PASS"
+                                if confidence >= 80
+                                and transcript
+                                else "REVIEW"
+                            )
+
+                            st.session_state.audio_result = {
+                                "transcript": transcript,
+                                "translation": translation,
+                                "description": description,
+                                "confidence": confidence,
+                                "status": status,
+                                "model": model,
+                            }
+
+                            add_manifest(
+                                uploaded.name,
+                                "Audio",
+                                status,
+                                confidence,
+                            )
+
+                            st.rerun()
+
+                    except Exception as e:
+
+                        st.error(
+                            "Could not process the audio file."
+                        )
+
+                        with st.expander(
+                            "Technical details"
+                        ):
+                            st.code(str(e))
+
+    # RESULTS
+
+    result = st.session_state.audio_result
+
+    if result:
+
+        st.divider()
+
+        st.markdown(
+            '<div class="eyebrow">ANALYSIS RESULT</div>',
+            unsafe_allow_html=True,
+        )
+
+        c1, c2 = st.columns(2)
+
+        with c1:
+
+            st.markdown(
+                """
+                <div class="result-card">
+                    <div class="result-heading">
+                        Live Audio Transcript
+                    </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            st.write(
+                result["transcript"]
+                or "No transcript detected."
+            )
+
+            st.markdown(
+                "</div>",
+                unsafe_allow_html=True,
             )
 
         with c2:
 
-            st.metric(
-                "Translation",
-                (
-                    "Available"
-                    if translation
-                    else "N/A"
-                ),
+            st.markdown(
+                """
+                <div class="result-card">
+                    <div class="result-heading">
+                        English Translation
+                    </div>
+                """,
+                unsafe_allow_html=True,
             )
 
-        with c3:
-
-            st.metric(
-                "Confidence",
-                (
-                    f"{conf:.1f}%"
-                    if conf is not None
-                    else "Not supplied"
-                ),
+            st.write(
+                result["translation"]
+                or "No translation available."
             )
 
-        left, right = st.columns(2)
-
-        with left:
-
-            st.subheader(
-                "Live Audio Transcript"
+            st.markdown(
+                "</div>",
+                unsafe_allow_html=True,
             )
 
-            st.text_area(
-                "Transcript",
-                value=(
-                    transcript
-                    if transcript
-                    else "No understandable speech detected."
-                ),
-                height=250,
-                disabled=True,
-                label_visibility="collapsed",
-            )
-
-        with right:
-
-            st.subheader(
-                "Translation"
-            )
-
-            st.text_area(
-                "Translation",
-                value=(
-                    translation
-                    if translation
-                    else "No translation available."
-                ),
-                height=250,
-                disabled=True,
-                label_visibility="collapsed",
-            )
-
-        st.divider()
-
-        st.subheader(
-            f"AI Audio Description ({audio_description_count} lines requested)"
+        st.markdown(
+            """
+            <div class="result-card">
+                <div class="result-heading">
+                    AI Audio Description
+                </div>
+            """,
+            unsafe_allow_html=True,
         )
 
-        for index, line in enumerate(
-            lines,
-            start=1,
+        for i, line in enumerate(
+            result["description"],
+            1,
         ):
 
             st.write(
-                f"**{index}.** {line}"
+                f"**{i:02d}**  {line}"
             )
 
-        st.divider()
-
-        st.subheader(
-            "Quality Control"
+        st.markdown(
+            "</div>",
+            unsafe_allow_html=True,
         )
 
-        actual_count = len(
-            lines
+        status_class = (
+            "status-pass"
+            if result["status"] == "PASS"
+            else "status-review"
         )
 
-        q1, q2, q3 = st.columns(3)
-
-        with q1:
-
-            if (
-                actual_count
-                == audio_description_count
-            ):
-
-                st.success(
-                    f"Description count: PASS ({actual_count})"
-                )
-
-            else:
-
-                st.error(
-                    f"Description count: FAIL ({actual_count}/{audio_description_count})"
-                )
-
-        with q2:
-
-            if transcript:
-                st.success(
-                    "Transcript: PASS"
-                )
-            else:
-                st.info(
-                    "Transcript: No speech"
-                )
-
-        with q3:
-
-            if translation:
-                st.success(
-                    "Translation: PASS"
-                )
-            else:
-                st.info(
-                    "Translation: N/A"
-                )
+        st.markdown(
+            f"""
+            <div class="{status_class}">
+                {"✓ QC PASSED" if result["status"] == "PASS"
+                 else "⚠ NEEDS REVIEW"}
+                &nbsp;&nbsp;|&nbsp;&nbsp;
+                Confidence: {result["confidence"]:.0f}%
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
 
 # ============================================================
-# AUDITOR CONSOLE
+# PROFILE PAGE
 # ============================================================
 
-else:
+def profile_page(user):
 
-    st.header(
-        "Auditor Console"
+    if st.button("← Back to Dashboard"):
+
+        st.session_state.page = "dashboard"
+        st.rerun()
+
+    st.markdown(
+        '<div class="eyebrow">SETTINGS / PROFILE</div>',
+        unsafe_allow_html=True,
     )
 
-    st.caption(
-        "Review annotation records and export the QC manifest."
+    st.markdown(
+        '<div class="page-title">Your Profile</div>',
+        unsafe_allow_html=True,
     )
 
-    manifest = st.session_state.manifest
+    st.markdown(
+        """
+        <div class="page-subtitle">
+            Manage your personal information and profile picture.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-    if not manifest:
+    c1, c2 = st.columns([1, 2])
 
-        st.info(
-            "No analysis records available yet."
+    with c1:
+
+        if (
+            user.get("profile_picture")
+            and os.path.exists(user["profile_picture"])
+        ):
+
+            st.image(
+                user["profile_picture"],
+                width=150,
+            )
+
+        else:
+
+            st.markdown(
+                """
+                <div style="
+                    width:150px;
+                    height:150px;
+                    border-radius:50%;
+                    background:#e7f4eb;
+                    display:flex;
+                    align-items:center;
+                    justify-content:center;
+                    font-size:55px;
+                ">
+                    👤
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+    with c2:
+
+        new_name = st.text_input(
+            "Full name",
+            value=user["name"],
         )
 
-    else:
-
-        df = pd.DataFrame(
-            manifest
+        st.text_input(
+            "Email",
+            value=user["email"],
+            disabled=True,
         )
 
-        total = len(df)
-
-        passed = int(
-            (
-                df["QC"] == "PASS"
-            ).sum()
+        new_picture = st.file_uploader(
+            "Change profile picture",
+            type=[
+                "png",
+                "jpg",
+                "jpeg",
+            ],
         )
-
-        failed = total - passed
-
-        c1, c2, c3 = st.columns(3)
-
-        with c1:
-
-            st.metric(
-                "Total records",
-                total,
-            )
-
-        with c2:
-
-            st.metric(
-                "QC passed",
-                passed,
-            )
-
-        with c3:
-
-            st.metric(
-                "QC failed",
-                failed,
-            )
-
-        st.divider()
-
-        tab1, tab2 = st.tabs(
-            [
-                "Manifest",
-                "Statistics",
-            ]
-        )
-
-        with tab1:
-
-            st.subheader(
-                "Annotation Manifest"
-            )
-
-            st.dataframe(
-                df,
-                use_container_width=True,
-                hide_index=True,
-            )
-
-            csv_data = df.to_csv(
-                index=False
-            ).encode(
-                "utf-8"
-            )
-
-            st.download_button(
-                "Download CSV Manifest",
-                data=csv_data,
-                file_name="seed_lab_manifest.csv",
-                mime="text/csv",
-                use_container_width=True,
-            )
-
-        with tab2:
-
-            st.subheader(
-                "Records by Mode"
-            )
-
-            mode_counts = (
-                df["Mode"]
-                .value_counts()
-                .rename_axis("Mode")
-                .reset_index(
-                    name="Records"
-                )
-            )
-
-            st.dataframe(
-                mode_counts,
-                use_container_width=True,
-                hide_index=True,
-            )
-
-            st.subheader(
-                "QC Summary"
-            )
-
-            qc_counts = (
-                df["QC"]
-                .value_counts()
-                .rename_axis("QC Status")
-                .reset_index(
-                    name="Records"
-                )
-            )
-
-            st.dataframe(
-                qc_counts,
-                use_container_width=True,
-                hide_index=True,
-            )
-
-        st.divider()
 
         if st.button(
-            "Clear Auditor Manifest"
+            "Save Profile",
+            type="primary",
+        ):
+
+            picture_path = user.get(
+                "profile_picture"
+            )
+
+            if new_picture:
+
+                extension = Path(
+                    new_picture.name
+                ).suffix.lower()
+
+                filename = (
+                    f"user_{user['id']}_"
+                    f"{secrets.token_hex(5)}"
+                    f"{extension}"
+                )
+
+                picture_path = str(
+                    PROFILE_DIR / filename
+                )
+
+                with open(
+                    picture_path,
+                    "wb",
+                ) as f:
+                    f.write(
+                        new_picture.getbuffer()
+                    )
+
+            update_user(
+                user["id"],
+                new_name,
+                picture_path,
+            )
+
+            st.success(
+                "Profile updated successfully."
+            )
+
+            st.rerun()
+
+
+# ============================================================
+# ACCOUNT PAGE
+# ============================================================
+
+def account_page(user):
+
+    if st.button("← Back to Dashboard"):
+
+        st.session_state.page = "dashboard"
+        st.rerun()
+
+    st.markdown(
+        '<div class="eyebrow">SETTINGS / ACCOUNT</div>',
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        '<div class="page-title">Account & Security</div>',
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        """
+        <div class="page-subtitle">
+            Manage your account and password security.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        '<div class="profile-card">',
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("### Account information")
+
+    st.text_input(
+        "Email",
+        value=user["email"],
+        disabled=True,
+    )
+
+    st.text_input(
+        "Account created",
+        value=user["created_at"],
+        disabled=True,
+    )
+
+    st.markdown("### Change password")
+
+    new_password = st.text_input(
+        "New password",
+        type="password",
+    )
+
+    confirm_password = st.text_input(
+        "Confirm new password",
+        type="password",
+    )
+
+    if st.button(
+        "Update Password",
+        type="primary",
+    ):
+
+        if len(new_password) < 8:
+
+            st.error(
+                "Password must contain at least 8 characters."
+            )
+
+        elif new_password != confirm_password:
+
+            st.error(
+                "Passwords do not match."
+            )
+
+        else:
+
+            change_password(
+                user["id"],
+                new_password,
+            )
+
+            st.success(
+                "Password updated successfully."
+            )
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    if st.button(
+        "↪ Sign Out",
+        use_container_width=True,
+    ):
+
+        logout()
+
+
+# ============================================================
+# AUDITOR
+# ============================================================
+
+def auditor_page():
+
+    st.markdown(
+        '<div class="eyebrow">QUALITY CONTROL</div>',
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        '<div class="page-title">Auditor Console</div>',
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        """
+        <div class="page-subtitle">
+            Review processing history and export QC records.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    total = len(
+        st.session_state.manifest
+    )
+
+    passed = len(
+        [
+            x for x in st.session_state.manifest
+            if x["Status"] == "PASS"
+        ]
+    )
+
+    review = total - passed
+
+    c1, c2, c3 = st.columns(3)
+
+    with c1:
+        st.metric(
+            "Total",
+            total,
+        )
+
+    with c2:
+        st.metric(
+            "Passed",
+            passed,
+        )
+
+    with c3:
+        st.metric(
+            "Review",
+            review,
+        )
+
+    st.divider()
+
+    if st.session_state.manifest:
+
+        import pandas as pd
+
+        df = pd.DataFrame(
+            st.session_state.manifest
+        )
+
+        st.dataframe(
+            df,
+            use_container_width=True,
+            hide_index=True,
+        )
+
+        csv_data = df.to_csv(
+            index=False
+        ).encode("utf-8")
+
+        st.download_button(
+            "↓ Download CSV",
+            data=csv_data,
+            file_name="seed_lab_qc_manifest.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
+
+        if st.button(
+            "Clear Current Manifest",
+            use_container_width=True,
         ):
 
             st.session_state.manifest = []
 
             st.rerun()
 
+    else:
+
+        st.info(
+            "No QC records are available yet."
+        )
+
+
+# ============================================================
+# MAIN APPLICATION
+# ============================================================
+
+if not st.session_state.logged_in:
+
+    authentication_page()
+    st.stop()
+
+
+# CURRENT USER
+
+user = get_user(
+    st.session_state.user_id
+)
+
+if not user:
+
+    st.session_state.logged_in = False
+    st.rerun()
+
+
+# SIDEBAR
+
+render_sidebar(user)
+
+
+# ============================================================
+# PAGE ROUTING
+# ============================================================
+
+if st.session_state.page == "profile":
+
+    profile_page(user)
+
+elif st.session_state.page == "account":
+
+    account_page(user)
+
+elif st.session_state.page == "auditor":
+
+    auditor_page()
+
+elif (
+    st.session_state.page == "studio"
+    and st.session_state.studio == "image"
+):
+
+    image_studio()
+
+elif (
+    st.session_state.page == "studio"
+    and st.session_state.studio == "audio"
+):
+
+    audio_studio()
+
+else:
+
+    dashboard_page(user)
+
 
 # ============================================================
 # FOOTER
 # ============================================================
 
-st.divider()
-
-st.caption(
-    "🌿 SEED Lab Multimodal Studio • Secure Multimodal Data Quality Control"
+st.markdown(
+    """
+    <div style="
+        text-align:center;
+        color:#8a9890;
+        font-size:11px;
+        padding:35px 0 10px;
+    ">
+        🌿 SEED Lab Multimodal Studio
+        &nbsp;•&nbsp;
+        Secure Multimodal Data Quality Control
+    </div>
+    """,
+    unsafe_allow_html=True,
 )

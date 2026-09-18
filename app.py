@@ -21,7 +21,7 @@ API_KEY = st.secrets.get("GEMINI_API_KEY", "")
 
 if API_KEY:
     client = genai.Client(api_key=API_KEY)
-    MODEL_NAME = "gemini-3.8-flash"
+    MODEL_NAME = "gemini-3.6-flash"
 else:
     client = None
     MODEL_NAME = ""

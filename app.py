@@ -607,36 +607,31 @@ def login_user(email, password):
         return False, error
 
 
-def register_user(
-    name,
-    email,
-    password
-):
+def register_user(name, email, password):
 
     if not supabase:
-
-        return False, (
-            "Supabase is not configured."
-        )
+        return False, "Supabase is not configured."
 
     name = name.strip()
     email = clean_email(email)
 
+    # Check name
     if not name:
         return False, "Please enter your name."
 
+    # Check email
     if not valid_email(email):
         return False, "Please enter a valid email address."
 
-    password_error = password_strength(
-        password
-    )
+    # Check password
+    password_error = password_strength(password)
 
     if password_error:
         return False, password_error
 
     try:
 
+        # Create account in Supabase Authentication
         response = supabase.auth.sign_up(
             {
                 "email": email,
@@ -652,48 +647,73 @@ def register_user(
         user = response.user
         session = response.session
 
+        # Make sure user was created
         if not user:
-            return False, (
-                "Account creation failed."
-            )
+            return False, "Account creation failed."
 
-        # Save profile immediately.
-        create_or_update_profile(
-            str(user.id),
-            name
-        )
+        # --------------------------------------------------
+        # EMAIL CONFIRMATION OFF
+        # --------------------------------------------------
+        # If email confirmation is disabled in Supabase,
+        # a session will be returned immediately.
+        # Then we can safely create the profile.
+        # --------------------------------------------------
 
-        # If Supabase email confirmation is disabled,
-        # a session is returned and the user can enter.
         if session:
 
+            profile_saved = create_or_update_profile(
+                str(user.id),
+                name
+            )
+
+            if not profile_saved:
+
+                return False, (
+                    "Account was created, but your profile "
+                    "could not be saved."
+                )
+
+            # Save login information in Streamlit session
             st.session_state.authenticated = True
+
             st.session_state.user = user
+
             st.session_state.profile = get_profile(
                 str(user.id)
             )
+
             st.session_state.page = "Overview"
 
             return True, "Account created successfully."
 
-        # Confirmation required
+        # --------------------------------------------------
+        # EMAIL CONFIRMATION ON
+        # --------------------------------------------------
+        # No authenticated session exists yet, so DON'T try
+        # to insert into profiles here.
+        # The user must confirm email and then sign in.
+        # --------------------------------------------------
+
         return True, (
-            "Account created. Please confirm your email, "
-            "then sign in."
+            "Account created successfully. "
+            "Please check your email and confirm your account. "
+            "Then return here and sign in."
         )
 
     except Exception as e:
 
         error = str(e)
 
+        # Existing account
         if "already registered" in error.lower():
+
             return False, (
                 "This email is already registered. "
                 "Please sign in."
             )
 
+        # Other Supabase error
         return False, error
-
 
 def logout_user():
 

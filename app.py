@@ -5,6 +5,7 @@ from google import genai
 from google.genai import types
 import json
 import io
+import time
 
 # ============================================================
 # PAGE CONFIG
@@ -68,6 +69,7 @@ st.sidebar.markdown("---")
 
 if client:
     st.sidebar.success("🟢 Gemini Cloud Engine Connected")
+    st.sidebar.caption(f"Model: {MODEL_NAME}")
 else:
     st.sidebar.warning(
         "🔒 Configure GEMINI_API_KEY in Streamlit Secrets."
@@ -86,7 +88,40 @@ def get_audio_mime_type(filename):
         "ogg": "audio/ogg"
     }
 
-    return mime_types.get(ext, "application/octet-stream")
+    return mime_types.get(
+        ext,
+        "application/octet-stream"
+    )
+
+
+# ============================================================
+# HELPER: GEMINI REQUEST WITH RETRY
+# ============================================================
+def generate_with_retry(contents, retries=2):
+    last_error = None
+
+    for attempt in range(retries + 1):
+        try:
+            return client.models.generate_content(
+                model=MODEL_NAME,
+                contents=contents
+            )
+
+        except Exception as e:
+            last_error = e
+
+            error_text = str(e)
+
+            # Retry temporary server overload errors
+            if "503" in error_text or "UNAVAILABLE" in error_text:
+
+                if attempt < retries:
+                    time.sleep(2)
+                    continue
+
+            raise last_error
+
+    raise last_error
 
 
 # ============================================================
@@ -99,6 +134,22 @@ if studio_mode == "🖼️ Image Data Studio":
     uploaded_file = st.sidebar.file_uploader(
         "Upload Image File",
         type=["jpg", "jpeg", "png"]
+    )
+
+    # --------------------------------------------------------
+    # DESCRIPTION LINE CONTROL
+    # --------------------------------------------------------
+    description_lines = st.sidebar.number_input(
+        "📝 Description Lines Required",
+        min_value=1,
+        max_value=20,
+        value=5,
+        step=1,
+        key="image_description_lines"
+    )
+
+    st.sidebar.caption(
+        f"AI will generate approximately {description_lines} lines."
     )
 
     left_panel, right_panel = st.columns([1, 1.2])
@@ -120,35 +171,60 @@ if studio_mode == "🖼️ Image Data Studio":
                 use_container_width=True
             )
 
-            extracted_text = "No text detected."
-            translated_text = "No translation available."
-            visual_description = "No description available."
-            ocr_confidence = 0.0
+            # ------------------------------------------------
+            # SESSION STATE FOR IMAGE RESULT
+            # ------------------------------------------------
+            if "image_result" not in st.session_state:
+                st.session_state.image_result = None
 
+            if "image_filename" not in st.session_state:
+                st.session_state.image_filename = None
+
+            # Reset when new image is uploaded
+            if (
+                st.session_state.image_filename
+                != uploaded_file.name
+            ):
+                st.session_state.image_result = None
+                st.session_state.image_filename = uploaded_file.name
+
+            # ------------------------------------------------
+            # GENERATE BUTTON
+            # ------------------------------------------------
             if client:
 
-                with st.spinner(
-                    "🧠 Visual AI is processing image..."
+                if st.button(
+                    "⚡ Generate Image Analysis",
+                    key="generate_image"
                 ):
 
-                    try:
+                    with st.spinner(
+                        "🧠 Gemini is analyzing the image..."
+                    ):
 
-                        img_buffer = io.BytesIO()
+                        try:
 
-                        if raw_img.mode in ("RGBA", "P"):
-                            raw_img = raw_img.convert("RGB")
+                            img_buffer = io.BytesIO()
 
-                        raw_img.thumbnail((1200, 1200))
+                            if raw_img.mode in ("RGBA", "P"):
+                                raw_img = raw_img.convert("RGB")
 
-                        raw_img.save(
-                            img_buffer,
-                            format="JPEG",
-                            quality=80
-                        )
+                            raw_img.thumbnail((1200, 1200))
 
-                        image_bytes = img_buffer.getvalue()
+                            raw_img.save(
+                                img_buffer,
+                                format="JPEG",
+                                quality=80
+                            )
 
-                        prompt = f"""
+                            image_bytes = (
+                                img_buffer.getvalue()
+                            )
+
+                            # --------------------------------
+                            # IMAGE PROMPT
+                            # --------------------------------
+                            prompt = f"""
 Analyze this image for an AI data-quality-control pipeline.
 
 Return ONLY valid JSON.
@@ -156,79 +232,147 @@ Return ONLY valid JSON.
 Use exactly this structure:
 
 {{
-    "extracted_text": "Extract visible text exactly.",
+    "extracted_text": "Extract all clearly visible text exactly.",
     "translated_text": "Translate the extracted text into {target_lang}.",
-    "visual_description": "Describe the important visual elements clearly.",
+    "visual_description": "Describe the important visual content in approximately {description_lines} lines.",
     "confidence_score": 0.95
 }}
 
-If there is no visible text, use:
-"No text detected."
-
-The confidence_score must be a number between 0 and 1.
+Description requirements:
+- Generate approximately {description_lines} lines.
+- Clearly describe the main objects, people, environment, actions,
+  colors, setting, and other important visual information when applicable.
+- Do not invent information that cannot be seen.
+- If there is no visible text, use "No text detected."
+- The confidence_score must be between 0 and 1.
+- Return JSON only.
 """
 
-                        response = client.models.generate_content(
-                            model=MODEL_NAME,
-                            contents=[
-                                prompt,
-                                types.Part.from_bytes(
-                                    data=image_bytes,
-                                    mime_type="image/jpeg"
+                            response = generate_with_retry(
+                                [
+                                    prompt,
+                                    types.Part.from_bytes(
+                                        data=image_bytes,
+                                        mime_type="image/jpeg"
+                                    )
+                                ]
+                            )
+
+                            clean_text = (
+                                response.text
+                                .replace("```json", "")
+                                .replace("```", "")
+                                .strip()
+                            )
+
+                            data = json.loads(clean_text)
+
+                            st.session_state.image_result = {
+                                "extracted_text": data.get(
+                                    "extracted_text",
+                                    "No text detected."
+                                ),
+                                "translated_text": data.get(
+                                    "translated_text",
+                                    "No translation available."
+                                ),
+                                "visual_description": data.get(
+                                    "visual_description",
+                                    "No description available."
+                                ),
+                                "confidence_score": float(
+                                    data.get(
+                                        "confidence_score",
+                                        0.90
+                                    )
                                 )
-                            ]
-                        )
+                            }
 
-                        clean_text = (
-                            response.text
-                            .replace("```json", "")
-                            .replace("```", "")
-                            .strip()
-                        )
+                            st.success(
+                                "✅ Image analysis completed!"
+                            )
 
-                        data = json.loads(clean_text)
+                        except json.JSONDecodeError:
 
-                        extracted_text = data.get(
-                            "extracted_text",
-                            "No text detected."
-                        )
+                            st.error(
+                                "⚠️ Gemini returned an invalid JSON response."
+                            )
 
-                        translated_text = data.get(
-                            "translated_text",
-                            "No translation available."
-                        )
+                        except Exception as e:
 
-                        visual_description = data.get(
-                            "visual_description",
-                            "No description available."
-                        )
+                            st.error(
+                                f"❌ Image processing error: {str(e)}"
+                            )
 
-                        ocr_confidence = float(
-                            data.get("confidence_score", 0.90)
-                        )
+            else:
 
-                    except Exception as e:
+                st.warning(
+                    "🔒 Add GEMINI_API_KEY to Streamlit Secrets."
+                )
 
-                        st.error(
-                            f"❌ Image processing error: {str(e)}"
-                        )
+            # ------------------------------------------------
+            # LOAD RESULTS
+            # ------------------------------------------------
+            result = st.session_state.image_result
+
+            if result:
+
+                extracted_text = result[
+                    "extracted_text"
+                ]
+
+                translated_text = result[
+                    "translated_text"
+                ]
+
+                visual_description = result[
+                    "visual_description"
+                ]
+
+                ocr_confidence = result[
+                    "confidence_score"
+                ]
+
+            else:
+
+                extracted_text = (
+                    "No analysis generated yet."
+                )
+
+                translated_text = (
+                    "No translation generated yet."
+                )
+
+                visual_description = (
+                    "No description generated yet."
+                )
+
+                ocr_confidence = 0.0
+
+            # ------------------------------------------------
+            # DISPLAY RESULTS
+            # ------------------------------------------------
+            st.markdown("---")
 
             raw_txt = st.text_area(
                 "1. Extracted Text (Live OCR)",
                 value=extracted_text,
-                height=100
+                height=100,
+                key="image_raw_text"
             )
 
             trans_txt = st.text_area(
                 f"2. Live Translated Output ({target_lang})",
                 value=translated_text,
-                height=100
+                height=100,
+                key="image_translation"
             )
 
             desc_txt = st.text_area(
                 "3. AI Visual Scene Description",
                 value=visual_description,
-                height=130
+                height=180,
+                key="image_description"
             )
 
         else:
@@ -244,9 +388,15 @@ The confidence_score must be a number between 0 and 1.
 
         st.subheader("🛡️ Image QC Gatekeeper")
 
-        if uploaded_file is not None and client:
+        if (
+            uploaded_file is not None
+            and client
+            and st.session_state.get("image_result")
+        ):
 
-            st.markdown("#### Automated Integrity Diagnostics")
+            st.markdown(
+                "#### Automated Integrity Diagnostics"
+            )
 
             c1 = ocr_confidence >= 0.85
 
@@ -256,7 +406,9 @@ The confidence_score must be a number between 0 and 1.
                 f"({ocr_confidence * 100:.1f}%)"
             )
 
-            description_words = len(desc_txt.split())
+            description_words = len(
+                desc_txt.split()
+            )
 
             c2 = description_words >= 8
 
@@ -279,7 +431,9 @@ The confidence_score must be a number between 0 and 1.
 
             st.markdown("---")
 
-            st.markdown("#### Data Auditor Console")
+            st.markdown(
+                "#### Data Auditor Console"
+            )
 
             audit_verdict = st.radio(
                 "Pipeline Routing Action:",
@@ -287,20 +441,26 @@ The confidence_score must be a number between 0 and 1.
                     "Approve & Record",
                     "Flag for Text Adjustments",
                     "Reject Dataset Item"
-                ]
+                ],
+                key="image_verdict"
             )
 
             auditor_notes = st.text_input(
-                "Auditor Quality Log Entries:"
+                "Auditor Quality Log Entries:",
+                key="image_notes"
             )
 
-            if st.button("Commit Image Record"):
+            if st.button(
+                "Commit Image Record",
+                key="commit_image"
+            ):
 
                 st.session_state.image_qc_log.append(
                     {
                         "Filename": uploaded_file.name,
                         "Modality": "Vision",
                         "Language": target_lang,
+                        "Description Lines": description_lines,
                         "Confidence": ocr_confidence,
                         "Verdict": audit_verdict,
                         "Notes": (
@@ -315,7 +475,9 @@ The confidence_score must be a number between 0 and 1.
                     "✅ Image record successfully verified and logged!"
                 )
 
-        st.markdown("### 📊 Active Batch Image Manifest")
+        st.markdown(
+            "### 📊 Active Batch Image Manifest"
+        )
 
         if st.session_state.image_qc_log:
 
@@ -358,6 +520,22 @@ elif studio_mode == "🔊 Audio Data Studio":
         type=["mp3", "wav", "m4a", "ogg"]
     )
 
+    # --------------------------------------------------------
+    # AUDIO DESCRIPTION LINE CONTROL
+    # --------------------------------------------------------
+    description_lines = st.sidebar.number_input(
+        "📝 Audio Description Lines Required",
+        min_value=1,
+        max_value=20,
+        value=5,
+        step=1,
+        key="audio_description_lines"
+    )
+
+    st.sidebar.caption(
+        f"AI will generate approximately {description_lines} lines."
+    )
+
     left_panel, right_panel = st.columns([1, 1.2])
 
     # --------------------------------------------------------
@@ -371,136 +549,206 @@ elif studio_mode == "🔊 Audio Data Studio":
 
             st.audio(uploaded_audio)
 
-            transcript = "No transcript generated."
-            translation = "No translation generated."
-            audio_description = "No audio description generated."
-            audio_confidence = 0.0
+            # ------------------------------------------------
+            # SESSION STATE FOR AUDIO RESULT
+            # ------------------------------------------------
+            if "audio_result" not in st.session_state:
+                st.session_state.audio_result = None
 
+            if "audio_filename" not in st.session_state:
+                st.session_state.audio_filename = None
+
+            # Reset when a new audio file is uploaded
+            if (
+                st.session_state.audio_filename
+                != uploaded_audio.name
+            ):
+                st.session_state.audio_result = None
+                st.session_state.audio_filename = (
+                    uploaded_audio.name
+                )
+
+            # ------------------------------------------------
+            # GENERATE BUTTON
+            # ------------------------------------------------
             if client:
 
-                with st.spinner(
-                    "🧠 Gemini is listening to and analyzing the audio..."
+                if st.button(
+                    "⚡ Generate Audio Analysis",
+                    key="generate_audio"
                 ):
 
-                    try:
+                    with st.spinner(
+                        "🧠 Gemini is listening and analyzing the audio..."
+                    ):
 
-                        audio_bytes = uploaded_audio.getvalue()
+                        try:
 
-                        mime_type = get_audio_mime_type(
-                            uploaded_audio.name
-                        )
+                            audio_bytes = (
+                                uploaded_audio.getvalue()
+                            )
 
-                        # ----------------------------------------
-                        # IMPORTANT:
-                        # Send audio as a real Gemini Part.
-                        # ----------------------------------------
-                        audio_part = types.Part.from_bytes(
-                            data=audio_bytes,
-                            mime_type=mime_type
-                        )
+                            mime_type = (
+                                get_audio_mime_type(
+                                    uploaded_audio.name
+                                )
+                            )
 
-                        prompt = f"""
-You are an audio data-quality analyst.
+                            audio_part = (
+                                types.Part.from_bytes(
+                                    data=audio_bytes,
+                                    mime_type=mime_type
+                                )
+                            )
 
-Analyze the attached audio carefully.
+                            # --------------------------------
+                            # SHORT + FAST AUDIO PROMPT
+                            # --------------------------------
+                            prompt = f"""
+Analyze this audio quickly for a data-quality pipeline.
 
-Return ONLY valid JSON using exactly this structure:
+Return ONLY valid JSON.
+
+Use exactly this structure:
 
 {{
-    "transcript": "Write the clearly understandable spoken words. If there is no understandable speech, write 'No clear speech detected.'",
+    "transcript": "Transcribe clearly understandable speech. If there is no understandable speech, write 'No clear speech detected.'",
     "translation": "Translate the transcript into {target_lang}. If there is no speech, write 'No translation available.'",
-    "audio_description": "Give a detailed description of the audio. Mention whether it contains speech, music, instruments, background sounds, environment/noise, approximate tempo if applicable, speaker characteristics if reasonably identifiable, emotional tone when reasonably inferable, and overall audio clarity.",
+    "audio_description": "Describe the audio in approximately {description_lines} lines.",
     "confidence_score": 0.90
 }}
 
-Important:
-- Do not invent speech that cannot be heard.
-- If the recording is instrumental or mostly background sound, clearly say so.
-- Keep the audio_description detailed and useful for a data-quality pipeline.
+Audio description requirements:
+- Generate approximately {description_lines} lines.
+- Mention speech, music, instruments, background sounds,
+  environment/noise, speaker characteristics and overall clarity
+  when applicable.
+- Do not invent unclear speech.
+- If the recording is instrumental or mostly background sound,
+  clearly state that.
+- Keep the description useful for a data-quality pipeline.
 - Return JSON only.
 """
 
-                        response = client.models.generate_content(
-                            model=MODEL_NAME,
-                            contents=[
-                                prompt,
-                                audio_part
-                            ]
-                        )
-
-                        res_text = response.text.strip()
-
-                        # Remove accidental markdown fences
-                        clean_text = (
-                            res_text
-                            .replace("```json", "")
-                            .replace("```", "")
-                            .strip()
-                        )
-
-                        data = json.loads(clean_text)
-
-                        transcript = data.get(
-                            "transcript",
-                            "No transcript generated."
-                        )
-
-                        translation = data.get(
-                            "translation",
-                            "No translation generated."
-                        )
-
-                        audio_description = data.get(
-                            "audio_description",
-                            "No audio description generated."
-                        )
-
-                        audio_confidence = float(
-                            data.get(
-                                "confidence_score",
-                                0.90
+                            response = generate_with_retry(
+                                [
+                                    prompt,
+                                    audio_part
+                                ]
                             )
-                        )
 
-                    except json.JSONDecodeError:
+                            res_text = (
+                                response.text.strip()
+                            )
 
-                        st.warning(
-                            "⚠️ Gemini returned text instead of JSON. "
-                            "Showing the raw AI response below."
-                        )
+                            clean_text = (
+                                res_text
+                                .replace("```json", "")
+                                .replace("```", "")
+                                .strip()
+                            )
 
-                        audio_description = (
-                            res_text
-                            if "res_text" in locals()
-                            else "No response received."
-                        )
+                            data = json.loads(
+                                clean_text
+                            )
 
-                    except Exception as e:
+                            st.session_state.audio_result = {
+                                "transcript": data.get(
+                                    "transcript",
+                                    "No transcript generated."
+                                ),
+                                "translation": data.get(
+                                    "translation",
+                                    "No translation generated."
+                                ),
+                                "audio_description": data.get(
+                                    "audio_description",
+                                    "No audio description generated."
+                                ),
+                                "confidence_score": float(
+                                    data.get(
+                                        "confidence_score",
+                                        0.90
+                                    )
+                                )
+                            }
 
-                        st.error(
-                            f"❌ Audio processing error: {str(e)}"
-                        )
+                            st.success(
+                                "✅ Audio analysis completed!"
+                            )
+
+                        except json.JSONDecodeError:
+
+                            st.error(
+                                "⚠️ Gemini returned an invalid JSON response."
+                            )
+
+                        except Exception as e:
+
+                            st.error(
+                                f"❌ Audio processing error: {str(e)}"
+                            )
 
             else:
 
                 st.warning(
-                    "🔒 Add GEMINI_API_KEY to Streamlit Secrets "
-                    "to analyze the audio."
+                    "🔒 Add GEMINI_API_KEY to Streamlit Secrets."
                 )
 
-            # ----------------------------------------
-            # DISPLAY RESULTS
-            # ----------------------------------------
+            # ------------------------------------------------
+            # LOAD RESULTS
+            # ------------------------------------------------
+            result = st.session_state.audio_result
 
+            if result:
+
+                transcript = result[
+                    "transcript"
+                ]
+
+                translation = result[
+                    "translation"
+                ]
+
+                audio_description = result[
+                    "audio_description"
+                ]
+
+                audio_confidence = result[
+                    "confidence_score"
+                ]
+
+            else:
+
+                transcript = (
+                    "No analysis generated yet."
+                )
+
+                translation = (
+                    "No translation generated yet."
+                )
+
+                audio_description = (
+                    "No audio description generated yet."
+                )
+
+                audio_confidence = 0.0
+
+            # ------------------------------------------------
+            # DISPLAY RESULTS
+            # ------------------------------------------------
             st.markdown("---")
 
-            st.markdown("### 📝 1. Live Audio Transcript")
+            st.markdown(
+                "### 📝 1. Live Audio Transcript"
+            )
 
             transcript_txt = st.text_area(
                 "Transcript",
                 value=transcript,
                 height=130,
-                label_visibility="collapsed"
+                label_visibility="collapsed",
+                key="audio_transcript"
             )
 
             st.markdown(
@@ -511,16 +759,20 @@ Important:
                 "Translation",
                 value=translation,
                 height=130,
-                label_visibility="collapsed"
+                label_visibility="collapsed",
+                key="audio_translation"
             )
 
-            st.markdown("### 🎧 3. AI Audio Description")
+            st.markdown(
+                "### 🎧 3. AI Audio Description"
+            )
 
             audio_desc_txt = st.text_area(
                 "Audio Description",
                 value=audio_description,
                 height=220,
-                label_visibility="collapsed"
+                label_visibility="collapsed",
+                key="audio_description"
             )
 
             st.markdown(
@@ -542,7 +794,11 @@ Important:
 
         st.subheader("🛡️ Audio QC Gatekeeper")
 
-        if uploaded_audio is not None and client:
+        if (
+            uploaded_audio is not None
+            and client
+            and st.session_state.get("audio_result")
+        ):
 
             st.markdown(
                 "#### Automated Integrity Diagnostics"
@@ -552,8 +808,12 @@ Important:
                 transcript_txt.strip()
             )
 
+            description_word_count = len(
+                audio_desc_txt.split()
+            )
+
             description_ok = (
-                len(audio_desc_txt.split()) >= 10
+                description_word_count >= 10
             )
 
             confidence_ok = (
@@ -568,7 +828,7 @@ Important:
             st.write(
                 f"{'✅' if description_ok else '❌'} "
                 "**Rule 2: Audio Description Density** "
-                f"({len(audio_desc_txt.split())} words)"
+                f"({description_word_count} words)"
             )
 
             st.write(
@@ -579,7 +839,9 @@ Important:
 
             st.markdown("---")
 
-            st.markdown("#### 🎛️ Data Auditor Console")
+            st.markdown(
+                "#### 🎛️ Data Auditor Console"
+            )
 
             audio_verdict = st.radio(
                 "Pipeline Routing Action:",
@@ -606,6 +868,7 @@ Important:
                         "Filename": uploaded_audio.name,
                         "Modality": "Audio",
                         "Language": target_lang,
+                        "Description Lines": description_lines,
                         "Confidence": audio_confidence,
                         "Verdict": audio_verdict,
                         "Notes": (

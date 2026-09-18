@@ -896,35 +896,58 @@ with st.sidebar:
     # SETTINGS AT BOTTOM LEFT
     # ========================================================
 
-    st.subheader(
-        "⚙️ Settings"
-    )
+    # =========================
+# SETTINGS
+# =========================
+
+if "settings_open" not in st.session_state:
+    st.session_state.settings_open = False
+
+st.divider()
+
+# Main Settings button
+if st.button(
+    "⚙️ Settings",
+    use_container_width=True,
+):
+    st.session_state.settings_open = not st.session_state.settings_open
+    st.rerun()
+
+
+# Show options ONLY when Settings is clicked
+if st.session_state.settings_open:
 
     settings_choice = st.radio(
         "Settings",
         [
-            "Profile",
-            "Account",
+            "👤 Profile",
+            "🔐 Account",
         ],
         label_visibility="collapsed",
     )
 
-    if settings_choice == "Profile":
+    # -------------------------
+    # PROFILE
+    # -------------------------
+    if settings_choice == "👤 Profile":
 
         if st.button(
             "Open Profile",
             use_container_width=True,
         ):
+            st.session_state.page = "profile"
+            st.rerun()
 
-            st.session_state.settings_open = True
 
-    if settings_choice == "Account":
+    # -------------------------
+    # ACCOUNT
+    # -------------------------
+    if settings_choice == "🔐 Account":
 
         if st.button(
             "Logout",
             use_container_width=True,
         ):
-
             st.session_state.logged_in = False
             st.session_state.user_id = None
             st.session_state.image_result = None
@@ -933,15 +956,9 @@ with st.sidebar:
 
             st.rerun()
 
-    st.divider()
 
-    st.caption(
-        "SEED Lab Multimodal Studio"
-    )
-
-    st.caption(
-        "Secure user workspace"
-    )
+st.caption("SEED Lab Multimodal Studio")
+st.caption("Secure user workspace")
 
 
 # ============================================================

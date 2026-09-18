@@ -14,7 +14,6 @@ import time
 
 st.set_page_config(
     page_title="SEED Lab Multimodal QC Studio",
-    page_icon="🔬",
     layout="wide"
 )
 
@@ -27,10 +26,21 @@ API_KEY = st.secrets.get("GEMINI_API_KEY", "")
 
 if API_KEY:
     client = genai.Client(api_key=API_KEY)
-    MODEL_NAME = "gemini-3.6-flash"
+
+    # Primary model
+    MODEL_NAME = "gemini-3.8-flash"
+
+    # Automatic fallback models
+    FALLBACK_MODELS = [
+        "gemini-3.6-flash",
+        "gemini-3.5-flash-lite",
+        "gemini-3.5-flash"
+    ]
+
 else:
     client = None
     MODEL_NAME = ""
+    FALLBACK_MODELS = []
 
 
 # ============================================================
@@ -38,7 +48,10 @@ else:
 # ============================================================
 
 st.title("🔬 Samsung SEED Lab: Unified Multimodal Data QC Studio")
-st.caption("Centralized Quality Control Pipeline for Vision & Speech Assets")
+
+st.caption(
+    "Centralized Quality Control Pipeline for Vision & Speech Assets"
+)
 
 
 # ============================================================
@@ -63,9 +76,6 @@ if "audio_result" not in st.session_state:
 if "audio_filename" not in st.session_state:
     st.session_state.audio_filename = None
 
-if "last_audio_error" not in st.session_state:
-    st.session_state.last_audio_error = ""
-
 
 # ============================================================
 # SIDEBAR
@@ -81,6 +91,7 @@ studio_mode = st.sidebar.radio(
     ]
 )
 
+
 target_lang = st.sidebar.selectbox(
     "Target Translation Language:",
     [
@@ -91,22 +102,37 @@ target_lang = st.sidebar.selectbox(
     ]
 )
 
+
 st.sidebar.markdown("---")
 
+
 if client:
-    st.sidebar.success("🟢 Gemini Cloud Engine Connected")
-    st.sidebar.caption(f"Model: {MODEL_NAME}")
+
+    st.sidebar.success(
+        "🟢 Gemini Cloud Engine Connected"
+    )
+
+    st.sidebar.caption(
+        f"Primary Model: {MODEL_NAME}"
+    )
+
+    st.sidebar.caption(
+        "Automatic fallback enabled"
+    )
+
 else:
+
     st.sidebar.warning(
         "🔒 Configure GEMINI_API_KEY in Streamlit Secrets."
     )
 
 
 # ============================================================
-# HELPER: MIME TYPE
+# HELPER: AUDIO MIME TYPE
 # ============================================================
 
 def get_audio_mime_type(filename):
+
     ext = filename.lower().split(".")[-1]
 
     mime_types = {
@@ -123,153 +149,164 @@ def get_audio_mime_type(filename):
 
 
 # ============================================================
-# HELPER: RETRY GEMINI REQUEST
-# ============================================================
-
-def generate_with_retry(contents, config=None, retries=2):
-    last_error = None
-
-    for attempt in range(retries + 1):
-        try:
-            if config is not None:
-                return client.models.generate_content(
-                    model=MODEL_NAME,
-                    contents=contents,
-                    config=config
-                )
-
-            return client.models.generate_content(
-                model=MODEL_NAME,
-                contents=contents
-            )
-
-        except Exception as e:
-            last_error = e
-            error_text = str(e)
-
-            if (
-                "503" in error_text
-                or "UNAVAILABLE" in error_text
-                or "429" in error_text
-                or "RESOURCE_EXHAUSTED" in error_text
-            ):
-                if attempt < retries:
-                    time.sleep(2)
-                    continue
-
-            raise last_error
-
-    raise last_error
-
-
-# ============================================================
 # HELPER: CLEAN GEMINI JSON
 # ============================================================
 
 def clean_json_response(text):
+
     if not text:
-        raise ValueError("Gemini returned an empty response.")
+        return ""
 
     text = text.strip()
 
     if text.startswith("```json"):
         text = text[7:]
 
-    if text.startswith("```"):
+    elif text.startswith("```"):
         text = text[3:]
 
     if text.endswith("```"):
         text = text[:-3]
 
-    text = text.strip()
-
-    return json.loads(text)
+    return text.strip()
 
 
 # ============================================================
-# HELPER: EXACT DESCRIPTION LINES
+# HELPER: DESCRIPTION LINE PROCESSOR
 # ============================================================
 
-def enforce_description_lines(lines, requested_lines):
-    """
-    Makes the description contain exactly the requested
-    number of displayed lines.
-    """
+def normalize_description_lines(description, requested_lines):
 
-    if isinstance(lines, str):
-        raw_lines = [
-            line.strip()
-            for line in lines.splitlines()
-            if line.strip()
-        ]
-    elif isinstance(lines, list):
-        raw_lines = [
-            str(line).strip()
-            for line in lines
-            if str(line).strip()
-        ]
-    else:
-        raw_lines = []
+    if not description:
+        return "No description generated."
 
-    # Remove accidental numbering.
-    cleaned = []
+    # If Gemini returns a list
+    if isinstance(description, list):
 
-    for line in raw_lines:
-        line = line.strip()
+        lines = []
 
-        while len(line) > 2 and line[0].isdigit():
-            if line[1] in [".", ")", "-", ":"]:
-                line = line[2:].strip()
-            else:
-                break
+        for item in description:
 
-        cleaned.append(line)
+            item = str(item).strip()
 
-    raw_lines = cleaned
+            if item:
+                lines.append(item)
 
-    if not raw_lines:
-        return "No audio description generated."
+        lines = lines[:requested_lines]
 
-    # If Gemini produced enough lines, keep exactly requested count.
-    if len(raw_lines) >= requested_lines:
+        return "\n".join(lines)
+
+    # If Gemini returns normal text
+    description = str(description).strip()
+
+    # Split existing lines first
+    lines = [
+        line.strip()
+        for line in description.splitlines()
+        if line.strip()
+    ]
+
+    if len(lines) >= requested_lines:
+
         return "\n".join(
-            raw_lines[:requested_lines]
+            lines[:requested_lines]
         )
 
-    # If fewer lines were returned, keep what we have.
-    # We don't invent additional information.
-    return "\n".join(raw_lines)
+    # If Gemini returned fewer lines,
+    # preserve the content instead of inventing text.
+    return description
 
 
 # ============================================================
-# HELPER: SAFE FLOAT
+# HELPER: GEMINI REQUEST WITH AUTOMATIC FALLBACK
 # ============================================================
 
-def safe_confidence(value, default=0.90):
-    try:
-        number = float(value)
+def generate_with_retry(contents, retries=2):
 
-        if number > 1:
-            number = number / 100
+    if not client:
 
-        return max(0.0, min(1.0, number))
+        raise RuntimeError(
+            "Gemini client is not configured."
+        )
 
-    except Exception:
-        return default
+    models_to_try = [
+        MODEL_NAME
+    ] + FALLBACK_MODELS
+
+    last_error = None
+
+    for model in models_to_try:
+
+        for attempt in range(retries + 1):
+
+            try:
+
+                response = client.models.generate_content(
+                    model=model,
+                    contents=contents
+                )
+
+                return response, model
+
+            except Exception as e:
+
+                last_error = e
+
+                error_text = str(e).upper()
+
+                temporary_error = (
+                    "503" in error_text
+                    or "UNAVAILABLE" in error_text
+                    or "429" in error_text
+                    or "RESOURCE_EXHAUSTED" in error_text
+                    or "TOO MANY REQUESTS" in error_text
+                )
+
+                if temporary_error:
+
+                    if attempt < retries:
+
+                        wait_time = 2 ** (
+                            attempt + 1
+                        )
+
+                        time.sleep(wait_time)
+
+                        continue
+
+                    # Current model still unavailable.
+                    # Move to next model.
+                    break
+
+                # Non-temporary error:
+                # do not silently hide it.
+                raise last_error
+
+    raise last_error
 
 
 # ============================================================
-# IMAGE DATA STUDIO
+# 🖼️ IMAGE DATA STUDIO
 # ============================================================
 
 if studio_mode == "🖼️ Image Data Studio":
 
-    st.sidebar.subheader("Ingest Image Asset")
+    st.sidebar.subheader(
+        "Ingest Image Asset"
+    )
 
     uploaded_file = st.sidebar.file_uploader(
         "Upload Image File",
-        type=["jpg", "jpeg", "png"]
+        type=[
+            "jpg",
+            "jpeg",
+            "png"
+        ]
     )
+
+    # --------------------------------------------------------
+    # DESCRIPTION LINE CONTROL
+    # --------------------------------------------------------
 
     description_lines = st.sidebar.number_input(
         "📝 Description Lines Required",
@@ -281,10 +318,14 @@ if studio_mode == "🖼️ Image Data Studio":
     )
 
     st.sidebar.caption(
-        f"AI will generate approximately {description_lines} lines."
+        f"AI will generate up to {description_lines} lines."
     )
 
-    left_panel, right_panel = st.columns([1, 1.2])
+
+    left_panel, right_panel = st.columns(
+        [1, 1.2]
+    )
+
 
     # ========================================================
     # IMAGE LEFT PANEL
@@ -292,11 +333,15 @@ if studio_mode == "🖼️ Image Data Studio":
 
     with left_panel:
 
-        st.subheader("🖼️ Vision Feature Extraction")
+        st.subheader(
+            "🖼️ Vision Feature Extraction"
+        )
 
         if uploaded_file is not None:
 
-            raw_img = Image.open(uploaded_file)
+            raw_img = Image.open(
+                uploaded_file
+            )
 
             st.image(
                 raw_img,
@@ -304,13 +349,26 @@ if studio_mode == "🖼️ Image Data Studio":
                 use_container_width=True
             )
 
-            # Reset result when new image is uploaded.
+
+            # ------------------------------------------------
+            # RESET WHEN NEW IMAGE
+            # ------------------------------------------------
+
             if (
                 st.session_state.image_filename
                 != uploaded_file.name
             ):
+
                 st.session_state.image_result = None
-                st.session_state.image_filename = uploaded_file.name
+
+                st.session_state.image_filename = (
+                    uploaded_file.name
+                )
+
+
+            # ------------------------------------------------
+            # GENERATE IMAGE ANALYSIS
+            # ------------------------------------------------
 
             if client:
 
@@ -327,18 +385,24 @@ if studio_mode == "🖼️ Image Data Studio":
 
                             img_buffer = io.BytesIO()
 
-                            processed_img = raw_img.copy()
+                            image_for_analysis = raw_img.copy()
 
-                            if processed_img.mode in ("RGBA", "P"):
-                                processed_img = processed_img.convert(
-                                    "RGB"
+                            if image_for_analysis.mode in (
+                                "RGBA",
+                                "P"
+                            ):
+
+                                image_for_analysis = (
+                                    image_for_analysis.convert(
+                                        "RGB"
+                                    )
                                 )
 
-                            processed_img.thumbnail(
+                            image_for_analysis.thumbnail(
                                 (1200, 1200)
                             )
 
-                            processed_img.save(
+                            image_for_analysis.save(
                                 img_buffer,
                                 format="JPEG",
                                 quality=80
@@ -348,137 +412,189 @@ if studio_mode == "🖼️ Image Data Studio":
                                 img_buffer.getvalue()
                             )
 
-                            image_prompt = f"""
-Analyze this image for a multimodal data-quality-control pipeline.
 
-Return structured data containing:
+                            # --------------------------------
+                            # IMAGE PROMPT
+                            # --------------------------------
 
-1. Extract all clearly visible text exactly.
-2. Translate that text into {target_lang}.
-3. Describe the visual scene.
-4. Give a confidence score between 0 and 1.
+                            prompt = f"""
+Analyze this image for an AI
+data-quality-control pipeline.
 
-The visual description should contain up to {description_lines}
-useful lines.
+Return ONLY valid JSON.
 
-Do not invent information.
+Use exactly this structure:
+
+{{
+    "extracted_text": "Extract all clearly visible text exactly. If no visible text exists, write No text detected.",
+    "translated_text": "Translate the extracted text into {target_lang}. If there is no text, write No translation available.",
+    "visual_description": [
+        "Description line 1",
+        "Description line 2"
+    ],
+    "confidence_score": 0.95
+}}
+
+Visual description requirements:
+
+- Generate up to {description_lines} useful lines.
+- Each item in visual_description must be one separate line.
+- Describe the important objects.
+- Describe people only using visible information.
+- Describe the environment and setting.
+- Describe actions when visible.
+- Mention important colors and visual characteristics.
+- Do not invent information.
+- Do not guess identities.
+- Do not claim something is present if it cannot be seen.
+- The confidence_score must be between 0 and 1.
+- Return JSON only.
 """
 
-                            image_schema = types.Schema(
-                                type=types.Type.OBJECT,
-                                properties={
-                                    "extracted_text": types.Schema(
-                                        type=types.Type.STRING
-                                    ),
-                                    "translated_text": types.Schema(
-                                        type=types.Type.STRING
-                                    ),
-                                    "visual_description": types.Schema(
-                                        type=types.Type.STRING
-                                    ),
-                                    "confidence_score": types.Schema(
-                                        type=types.Type.NUMBER
-                                    )
-                                },
-                                required=[
-                                    "extracted_text",
-                                    "translated_text",
-                                    "visual_description",
-                                    "confidence_score"
-                                ]
-                            )
 
-                            image_config = (
-                                types.GenerateContentConfig(
-                                    response_mime_type="application/json",
-                                    response_schema=image_schema
+                            response, used_model = (
+                                generate_with_retry(
+                                    [
+                                        prompt,
+                                        types.Part.from_bytes(
+                                            data=image_bytes,
+                                            mime_type="image/jpeg"
+                                        )
+                                    ]
                                 )
                             )
 
-                            response = generate_with_retry(
-                                [
-                                    image_prompt,
-                                    types.Part.from_bytes(
-                                        data=image_bytes,
-                                        mime_type="image/jpeg"
-                                    )
-                                ],
-                                config=image_config
+
+                            clean_text = (
+                                clean_json_response(
+                                    response.text
+                                )
                             )
 
-                            data = clean_json_response(
-                                response.text
+                            data = json.loads(
+                                clean_text
                             )
+
+
+                            visual_description = (
+                                normalize_description_lines(
+                                    data.get(
+                                        "visual_description",
+                                        []
+                                    ),
+                                    int(
+                                        description_lines
+                                    )
+                                )
+                            )
+
+
+                            confidence = float(
+                                data.get(
+                                    "confidence_score",
+                                    0.90
+                                )
+                            )
+
+
+                            # Keep confidence in valid range
+                            confidence = max(
+                                0.0,
+                                min(
+                                    1.0,
+                                    confidence
+                                )
+                            )
+
 
                             st.session_state.image_result = {
-                                "extracted_text": data.get(
-                                    "extracted_text",
-                                    "No text detected."
-                                ),
 
-                                "translated_text": data.get(
-                                    "translated_text",
-                                    "No translation available."
-                                ),
-
-                                "visual_description": data.get(
-                                    "visual_description",
-                                    "No description available."
-                                ),
-
-                                "confidence_score": safe_confidence(
+                                "extracted_text":
                                     data.get(
-                                        "confidence_score",
-                                        0.90
-                                    )
-                                )
+                                        "extracted_text",
+                                        "No text detected."
+                                    ),
+
+                                "translated_text":
+                                    data.get(
+                                        "translated_text",
+                                        "No translation available."
+                                    ),
+
+                                "visual_description":
+                                    visual_description,
+
+                                "confidence_score":
+                                    confidence,
+
+                                "model":
+                                    used_model
                             }
 
-                            st.success(
-                                "✅ Image analysis completed!"
+
+                            if used_model != MODEL_NAME:
+
+                                st.warning(
+                                    f"⚠️ Primary model was busy. "
+                                    f"Analysis completed using "
+                                    f"`{used_model}`."
+                                )
+
+                            else:
+
+                                st.success(
+                                    "✅ Image analysis completed!"
+                                )
+
+
+                        except json.JSONDecodeError:
+
+                            st.error(
+                                "⚠️ Gemini returned invalid JSON. "
+                                "Please try Generate again."
                             )
+
 
                         except Exception as e:
 
-                            st.session_state.image_result = None
-
                             st.error(
-                                "❌ Image processing error"
-                            )
-
-                            st.code(
-                                str(e)
+                                f"❌ Image processing error: {str(e)}"
                             )
 
             else:
 
                 st.warning(
-                    "🔒 Add GEMINI_API_KEY to Streamlit Secrets."
+                    "🔒 Add GEMINI_API_KEY to "
+                    "Streamlit Secrets."
                 )
 
-            # ====================================================
-            # IMAGE RESULTS
-            # ====================================================
 
-            result = st.session_state.image_result
+            # ------------------------------------------------
+            # LOAD IMAGE RESULT
+            # ------------------------------------------------
+
+            result = (
+                st.session_state.image_result
+            )
+
 
             if result:
 
-                extracted_text = result[
-                    "extracted_text"
-                ]
+                extracted_text = (
+                    result["extracted_text"]
+                )
 
-                translated_text = result[
-                    "translated_text"
-                ]
+                translated_text = (
+                    result["translated_text"]
+                )
 
-                visual_description = result[
-                    "visual_description"
-                ]
+                visual_description = (
+                    result["visual_description"]
+                )
 
-                ocr_confidence = result[
-                    "confidence_score"
-                ]
+                ocr_confidence = (
+                    result["confidence_score"]
+                )
 
             else:
 
@@ -496,7 +612,13 @@ Do not invent information.
 
                 ocr_confidence = 0.0
 
+
+            # ------------------------------------------------
+            # DISPLAY IMAGE RESULTS
+            # ------------------------------------------------
+
             st.markdown("---")
+
 
             raw_txt = st.text_area(
                 "1. Extracted Text (Live OCR)",
@@ -505,12 +627,14 @@ Do not invent information.
                 key="image_raw_text"
             )
 
+
             trans_txt = st.text_area(
                 f"2. Live Translated Output ({target_lang})",
                 value=translated_text,
                 height=100,
                 key="image_translation"
             )
+
 
             desc_txt = st.text_area(
                 "3. AI Visual Scene Description",
@@ -519,11 +643,22 @@ Do not invent information.
                 key="image_description"
             )
 
+
+            if result and result.get("model"):
+
+                st.caption(
+                    f"Generated using: "
+                    f"`{result['model']}`"
+                )
+
+
         else:
 
             st.info(
-                "Awaiting image dataset payload via the control panel."
+                "Awaiting image dataset payload "
+                "via the control panel."
             )
+
 
     # ========================================================
     # IMAGE RIGHT PANEL
@@ -531,19 +666,29 @@ Do not invent information.
 
     with right_panel:
 
-        st.subheader("🛡️ Image QC Gatekeeper")
+        st.subheader(
+            "🛡️ Image QC Gatekeeper"
+        )
+
 
         if (
             uploaded_file is not None
             and client
-            and st.session_state.get("image_result")
+            and st.session_state.get(
+                "image_result"
+            )
         ):
 
             st.markdown(
                 "#### Automated Integrity Diagnostics"
             )
 
-            c1 = ocr_confidence >= 0.85
+
+            # Rule 1
+            c1 = (
+                ocr_confidence >= 0.85
+            )
+
 
             st.write(
                 f"{'✅' if c1 else '❌'} "
@@ -551,11 +696,16 @@ Do not invent information.
                 f"({ocr_confidence * 100:.1f}%)"
             )
 
+
+            # Rule 2
             description_words = len(
                 desc_txt.split()
             )
 
-            c2 = description_words >= 8
+            c2 = (
+                description_words >= 8
+            )
+
 
             st.write(
                 f"{'✅' if c2 else '❌'} "
@@ -563,22 +713,32 @@ Do not invent information.
                 f"({description_words} words)"
             )
 
+
+            # Rule 3
             c3 = bool(
                 raw_txt.strip()
                 and trans_txt.strip()
                 and desc_txt.strip()
             )
 
+
             st.write(
                 f"{'✅' if c3 else '❌'} "
                 "**Rule 3: Non-Null Structural Payload**"
             )
 
+
             st.markdown("---")
+
+
+            # ------------------------------------------------
+            # DATA AUDITOR
+            # ------------------------------------------------
 
             st.markdown(
                 "#### Data Auditor Console"
             )
+
 
             audit_verdict = st.radio(
                 "Pipeline Routing Action:",
@@ -590,10 +750,12 @@ Do not invent information.
                 key="image_verdict"
             )
 
+
             auditor_notes = st.text_input(
                 "Auditor Quality Log Entries:",
                 key="image_notes"
             )
+
 
             if st.button(
                 "Commit Image Record",
@@ -602,27 +764,54 @@ Do not invent information.
 
                 st.session_state.image_qc_log.append(
                     {
-                        "Filename": uploaded_file.name,
-                        "Modality": "Vision",
-                        "Language": target_lang,
-                        "Description Lines": description_lines,
-                        "Confidence": ocr_confidence,
-                        "Verdict": audit_verdict,
-                        "Notes": (
-                            auditor_notes
-                            if auditor_notes
-                            else "Verified Asset"
-                        )
+                        "Filename":
+                            uploaded_file.name,
+
+                        "Modality":
+                            "Vision",
+
+                        "Language":
+                            target_lang,
+
+                        "Description Lines":
+                            description_lines,
+
+                        "Confidence":
+                            ocr_confidence,
+
+                        "Model":
+                            st.session_state.image_result.get(
+                                "model",
+                                MODEL_NAME
+                            ),
+
+                        "Verdict":
+                            audit_verdict,
+
+                        "Notes":
+                            (
+                                auditor_notes
+                                if auditor_notes
+                                else "Verified Asset"
+                            )
                     }
                 )
 
+
                 st.success(
-                    "✅ Image record successfully verified and logged!"
+                    "✅ Image record successfully "
+                    "verified and logged!"
                 )
+
+
+        # ----------------------------------------------------
+        # IMAGE MANIFEST
+        # ----------------------------------------------------
 
         st.markdown(
             "### 📊 Active Batch Image Manifest"
         )
+
 
         if st.session_state.image_qc_log:
 
@@ -630,14 +819,19 @@ Do not invent information.
                 st.session_state.image_qc_log
             )
 
+
             st.dataframe(
                 df_img,
                 use_container_width=True
             )
 
-            csv_img = df_img.to_csv(
-                index=False
-            ).encode("utf-8")
+
+            csv_img = (
+                df_img
+                .to_csv(index=False)
+                .encode("utf-8")
+            )
+
 
             st.download_button(
                 "📥 Export Image Manifest (CSV)",
@@ -649,22 +843,36 @@ Do not invent information.
         else:
 
             st.caption(
-                "No dynamic image rows logged in this batch yet."
+                "No dynamic image rows logged "
+                "in this batch yet."
             )
 
 
 # ============================================================
-# AUDIO DATA STUDIO
+# 🔊 AUDIO DATA STUDIO
 # ============================================================
 
 elif studio_mode == "🔊 Audio Data Studio":
 
-    st.sidebar.subheader("Ingest Audio Asset")
+    st.sidebar.subheader(
+        "Ingest Audio Asset"
+    )
+
 
     uploaded_audio = st.sidebar.file_uploader(
         "Upload Audio File",
-        type=["mp3", "wav", "m4a", "ogg"]
+        type=[
+            "mp3",
+            "wav",
+            "m4a",
+            "ogg"
+        ]
     )
+
+
+    # --------------------------------------------------------
+    # AUDIO DESCRIPTION LINE CONTROL
+    # --------------------------------------------------------
 
     description_lines = st.sidebar.number_input(
         "📝 Audio Description Lines Required",
@@ -675,11 +883,17 @@ elif studio_mode == "🔊 Audio Data Studio":
         key="audio_description_lines"
     )
 
+
     st.sidebar.caption(
-        f"AI will generate approximately {description_lines} lines."
+        f"AI will generate up to "
+        f"{description_lines} lines."
     )
 
-    left_panel, right_panel = st.columns([1, 1.2])
+
+    left_panel, right_panel = st.columns(
+        [1, 1.2]
+    )
+
 
     # ========================================================
     # AUDIO LEFT PANEL
@@ -687,22 +901,37 @@ elif studio_mode == "🔊 Audio Data Studio":
 
     with left_panel:
 
-        st.subheader("🔊 Acoustic Feature Extraction")
+        st.subheader(
+            "🔊 Acoustic Feature Extraction"
+        )
+
 
         if uploaded_audio is not None:
 
-            st.audio(uploaded_audio)
+            st.audio(
+                uploaded_audio
+            )
 
-            # Reset when new audio is uploaded.
+
+            # ------------------------------------------------
+            # RESET FOR NEW AUDIO
+            # ------------------------------------------------
+
             if (
                 st.session_state.audio_filename
                 != uploaded_audio.name
             ):
+
                 st.session_state.audio_result = None
+
                 st.session_state.audio_filename = (
                     uploaded_audio.name
                 )
-                st.session_state.last_audio_error = ""
+
+
+            # ------------------------------------------------
+            # GENERATE AUDIO ANALYSIS
+            # ------------------------------------------------
 
             if client:
 
@@ -712,23 +941,15 @@ elif studio_mode == "🔊 Audio Data Studio":
                 ):
 
                     with st.spinner(
-                        "🧠 Gemini is listening and analyzing the audio..."
+                        "🧠 Uploading and analyzing audio..."
                     ):
 
                         try:
-
-                            # ------------------------------------
-                            # READ AUDIO
-                            # ------------------------------------
 
                             audio_bytes = (
                                 uploaded_audio.getvalue()
                             )
 
-                            if not audio_bytes:
-                                raise ValueError(
-                                    "The uploaded audio file is empty."
-                                )
 
                             mime_type = (
                                 get_audio_mime_type(
@@ -736,17 +957,29 @@ elif studio_mode == "🔊 Audio Data Studio":
                                 )
                             )
 
-                            # ------------------------------------
-                            # UPLOAD AUDIO USING GEMINI FILE API
-                            # ------------------------------------
 
-                            audio_stream = io.BytesIO(
-                                audio_bytes
+                            # --------------------------------
+                            # GEMINI FILE API
+                            # --------------------------------
+                            #
+                            # This is more reliable for audio
+                            # than sending the complete audio
+                            # as an inline byte Part.
+                            #
+                            # Google documents this method for
+                            # audio input.
+                            # --------------------------------
+
+                            audio_stream = (
+                                io.BytesIO(
+                                    audio_bytes
+                                )
                             )
 
                             audio_stream.name = (
                                 uploaded_audio.name
                             )
+
 
                             uploaded_gemini_file = (
                                 client.files.upload(
@@ -757,307 +990,210 @@ elif studio_mode == "🔊 Audio Data Studio":
                                 )
                             )
 
-                            # ------------------------------------
+
+                            # --------------------------------
                             # AUDIO PROMPT
-                            # ------------------------------------
+                            # --------------------------------
 
-                            audio_prompt = f"""
-Analyze this audio recording for a multimodal
-data-quality-control pipeline.
+                            prompt = f"""
+You are an expert audio data-quality analyst.
 
-Return:
+Analyze the attached audio carefully.
 
-1. A clear transcript of understandable speech.
-2. A translation of the transcript into {target_lang}.
-3. An audio description containing approximately
-   {description_lines} separate lines.
-4. A confidence score from 0 to 1.
+Return ONLY valid JSON.
 
-For the audio description, describe only information
-that can reasonably be determined from the recording.
+Use exactly this structure:
 
-Consider:
-- speech
-- language
-- music
-- instruments
-- background sounds
-- environmental sounds
-- noise
-- speaker characteristics when reasonably identifiable
-- recording clarity
-- overall acoustic content
+{{
+    "transcript": "Clearly transcribe understandable spoken words. If there is no understandable speech, write No clear speech detected.",
+    "translation": "Translate the transcript into {target_lang}. If there is no speech, write No translation available.",
+    "audio_description": [
+        "Audio description line 1",
+        "Audio description line 2"
+    ],
+    "confidence_score": 0.90
+}}
 
-If there is no understandable speech, say:
-"No clear speech detected."
+Audio description requirements:
 
-If the recording is mainly music or environmental sound,
-describe that clearly.
-
-Do not invent sounds or events.
+- Generate up to {description_lines} separate lines.
+- Each array item must represent one description line.
+- Describe speech when present.
+- Describe music when present.
+- Describe instruments when identifiable.
+- Describe background sounds.
+- Describe environmental sounds.
+- Describe noise and audio clarity.
+- Mention speaker characteristics only when reasonably identifiable.
+- Mention emotional tone only when reasonably inferable from the audio.
+- Mention rhythm or tempo only when reasonably inferable.
+- Do not invent words that cannot be heard.
+- Do not invent speakers or events.
+- If the recording is instrumental or mostly background sound, clearly state that.
+- Keep the description useful for a data-quality pipeline.
+- Confidence must be between 0 and 1.
+- Return JSON only.
 """
 
-                            # ------------------------------------
-                            # STRUCTURED OUTPUT SCHEMA
-                            # ------------------------------------
 
-                            audio_schema = types.Schema(
-                                type=types.Type.OBJECT,
-                                properties={
-                                    "transcript": types.Schema(
-                                        type=types.Type.STRING,
-                                        description=(
-                                            "Clear transcription "
-                                            "of understandable speech."
-                                        )
+                            # --------------------------------
+                            # SEND AUDIO TO GEMINI
+                            # --------------------------------
+
+                            response, used_model = (
+                                generate_with_retry(
+                                    [
+                                        prompt,
+                                        uploaded_gemini_file
+                                    ]
+                                )
+                            )
+
+
+                            res_text = (
+                                response.text.strip()
+                            )
+
+
+                            clean_text = (
+                                clean_json_response(
+                                    res_text
+                                )
+                            )
+
+
+                            data = json.loads(
+                                clean_text
+                            )
+
+
+                            # --------------------------------
+                            # PROCESS DESCRIPTION
+                            # --------------------------------
+
+                            audio_description = (
+                                normalize_description_lines(
+                                    data.get(
+                                        "audio_description",
+                                        []
                                     ),
-
-                                    "translation": types.Schema(
-                                        type=types.Type.STRING,
-                                        description=(
-                                            f"Translation of the "
-                                            f"transcript into "
-                                            f"{target_lang}."
-                                        )
-                                    ),
-
-                                    "audio_description_lines": (
-                                        types.Schema(
-                                            type=types.Type.ARRAY,
-                                            items=types.Schema(
-                                                type=types.Type.STRING
-                                            ),
-                                            description=(
-                                                "Separate description "
-                                                "lines describing the "
-                                                "audio."
-                                            )
-                                        )
-                                    ),
-
-                                    "confidence_score": types.Schema(
-                                        type=types.Type.NUMBER,
-                                        description=(
-                                            "Confidence from 0 to 1."
-                                        )
+                                    int(
+                                        description_lines
                                     )
-                                },
-
-                                required=[
-                                    "transcript",
-                                    "translation",
-                                    "audio_description_lines",
-                                    "confidence_score"
-                                ]
-                            )
-
-                            audio_config = (
-                                types.GenerateContentConfig(
-                                    response_mime_type=(
-                                        "application/json"
-                                    ),
-                                    response_schema=audio_schema
                                 )
                             )
 
-                            # ------------------------------------
-                            # GEMINI AUDIO REQUEST
-                            # ------------------------------------
 
-                            response = generate_with_retry(
-                                [
-                                    uploaded_gemini_file,
-                                    audio_prompt
-                                ],
-                                config=audio_config
-                            )
-
-                            # ------------------------------------
-                            # DEBUG RESPONSE CHECK
-                            # ------------------------------------
-
-                            if not response:
-                                raise ValueError(
-                                    "Gemini returned no response."
-                                )
-
-                            response_text = (
-                                response.text
-                            )
-
-                            if not response_text:
-                                raise ValueError(
-                                    "Gemini returned an empty text response."
-                                )
-
-                            # ------------------------------------
-                            # PARSE STRUCTURED JSON
-                            # ------------------------------------
-
-                            data = clean_json_response(
-                                response_text
-                            )
-
-                            transcript_value = (
-                                data.get(
-                                    "transcript",
-                                    ""
-                                )
-                            )
-
-                            translation_value = (
-                                data.get(
-                                    "translation",
-                                    ""
-                                )
-                            )
-
-                            description_value = (
-                                data.get(
-                                    "audio_description_lines",
-                                    []
-                                )
-                            )
-
-                            confidence_value = (
+                            audio_confidence = float(
                                 data.get(
                                     "confidence_score",
                                     0.90
                                 )
                             )
 
-                            # ------------------------------------
-                            # DESCRIPTION LINE PROCESSING
-                            # ------------------------------------
 
-                            final_description = (
-                                enforce_description_lines(
-                                    description_value,
-                                    int(description_lines)
+                            audio_confidence = max(
+                                0.0,
+                                min(
+                                    1.0,
+                                    audio_confidence
                                 )
                             )
 
-                            # ------------------------------------
-                            # FALLBACKS
-                            # ------------------------------------
 
-                            if not transcript_value:
-                                transcript_value = (
-                                    "No clear speech detected."
-                                )
-
-                            if not translation_value:
-                                translation_value = (
-                                    "No translation available."
-                                )
-
-                            if not final_description:
-                                final_description = (
-                                    "No audio description generated."
-                                )
-
-                            # ------------------------------------
+                            # --------------------------------
                             # SAVE RESULT
-                            # ------------------------------------
+                            # --------------------------------
 
                             st.session_state.audio_result = {
-                                "transcript": (
-                                    str(
-                                        transcript_value
-                                    )
-                                ),
 
-                                "translation": (
-                                    str(
-                                        translation_value
-                                    )
-                                ),
+                                "transcript":
+                                    data.get(
+                                        "transcript",
+                                        "No transcript generated."
+                                    ),
 
-                                "audio_description": (
-                                    final_description
-                                ),
+                                "translation":
+                                    data.get(
+                                        "translation",
+                                        "No translation generated."
+                                    ),
 
-                                "confidence_score": (
-                                    safe_confidence(
-                                        confidence_value
-                                    )
-                                )
+                                "audio_description":
+                                    audio_description,
+
+                                "confidence_score":
+                                    audio_confidence,
+
+                                "model":
+                                    used_model
                             }
 
-                            st.session_state.last_audio_error = ""
 
-                            st.success(
-                                "✅ Audio analysis completed successfully!"
-                            )
+                            if used_model != MODEL_NAME:
 
-                        except json.JSONDecodeError as e:
+                                st.warning(
+                                    f"⚠️ Primary model was busy. "
+                                    f"Analysis completed using "
+                                    f"`{used_model}`."
+                                )
 
-                            st.session_state.audio_result = None
+                            else:
 
-                            error_message = (
-                                "Gemini returned data that "
-                                "could not be parsed as JSON."
-                            )
+                                st.success(
+                                    "✅ Audio analysis completed!"
+                                )
 
-                            st.session_state.last_audio_error = (
-                                error_message
-                            )
+
+                        except json.JSONDecodeError:
 
                             st.error(
-                                f"❌ {error_message}"
+                                "⚠️ Gemini returned invalid JSON. "
+                                "Please press Generate again."
                             )
 
-                            st.code(
-                                str(e)
-                            )
 
                         except Exception as e:
 
-                            st.session_state.audio_result = None
-
-                            error_message = str(e)
-
-                            st.session_state.last_audio_error = (
-                                error_message
-                            )
-
                             st.error(
-                                "❌ Audio processing error"
+                                f"❌ Audio processing error: {str(e)}"
                             )
 
-                            st.code(
-                                error_message
-                            )
 
             else:
 
                 st.warning(
-                    "🔒 Add GEMINI_API_KEY to Streamlit Secrets."
+                    "🔒 Add GEMINI_API_KEY to "
+                    "Streamlit Secrets."
                 )
 
-            # ====================================================
-            # AUDIO RESULTS
-            # ====================================================
 
-            result = st.session_state.audio_result
+            # ------------------------------------------------
+            # LOAD AUDIO RESULT
+            # ------------------------------------------------
+
+            result = (
+                st.session_state.audio_result
+            )
+
 
             if result:
 
-                transcript = result[
-                    "transcript"
-                ]
+                transcript = (
+                    result["transcript"]
+                )
 
-                translation = result[
-                    "translation"
-                ]
+                translation = (
+                    result["translation"]
+                )
 
-                audio_description = result[
-                    "audio_description"
-                ]
+                audio_description = (
+                    result["audio_description"]
+                )
 
-                audio_confidence = result[
-                    "confidence_score"
-                ]
+                audio_confidence = (
+                    result["confidence_score"]
+                )
 
             else:
 
@@ -1075,15 +1211,18 @@ Do not invent sounds or events.
 
                 audio_confidence = 0.0
 
+
+            # ------------------------------------------------
+            # DISPLAY AUDIO RESULTS
+            # ------------------------------------------------
+
             st.markdown("---")
 
-            # ====================================================
-            # 1. TRANSCRIPT
-            # ====================================================
 
             st.markdown(
                 "### 📝 1. Live Audio Transcript"
             )
+
 
             transcript_txt = st.text_area(
                 "Transcript",
@@ -1093,13 +1232,11 @@ Do not invent sounds or events.
                 key="audio_transcript"
             )
 
-            # ====================================================
-            # 2. TRANSLATION
-            # ====================================================
 
             st.markdown(
                 f"### 🌐 2. Translation ({target_lang})"
             )
+
 
             translation_txt = st.text_area(
                 "Translation",
@@ -1109,13 +1246,11 @@ Do not invent sounds or events.
                 key="audio_translation"
             )
 
-            # ====================================================
-            # 3. AUDIO DESCRIPTION
-            # ====================================================
 
             st.markdown(
                 "### 🎧 3. AI Audio Description"
             )
+
 
             audio_desc_txt = st.text_area(
                 "Audio Description",
@@ -1125,31 +1260,28 @@ Do not invent sounds or events.
                 key="audio_description"
             )
 
+
             st.markdown(
                 f"**AI Analysis Confidence:** "
                 f"{audio_confidence * 100:.1f}%"
             )
 
-            # Show previous error if one exists.
-            if (
-                st.session_state.last_audio_error
-                and not st.session_state.audio_result
-            ):
 
-                with st.expander(
-                    "🔎 Show technical error"
-                ):
+            if result and result.get("model"):
 
-                    st.code(
-                        st.session_state.last_audio_error
-                    )
+                st.caption(
+                    f"Generated using: "
+                    f"`{result['model']}`"
+                )
+
 
         else:
 
             st.info(
-                "🎵 Upload an MP3, WAV, M4A or OGG file "
-                "from the control panel."
+                "🎵 Upload an MP3, WAV, M4A or OGG "
+                "file from the control panel."
             )
+
 
     # ========================================================
     # AUDIO RIGHT PANEL
@@ -1157,41 +1289,46 @@ Do not invent sounds or events.
 
     with right_panel:
 
-        st.subheader("🛡️ Audio QC Gatekeeper")
+        st.subheader(
+            "🛡️ Audio QC Gatekeeper"
+        )
+
 
         if (
             uploaded_audio is not None
             and client
-            and st.session_state.get("audio_result")
+            and st.session_state.get(
+                "audio_result"
+            )
         ):
 
             st.markdown(
                 "#### Automated Integrity Diagnostics"
             )
 
+
+            # Rule 1
             transcript_ok = bool(
                 transcript_txt.strip()
-                and
-                "No analysis generated yet."
-                not in transcript_txt
             )
 
-            description_word_count = len(
-                audio_desc_txt.split()
-            )
-
-            description_ok = (
-                description_word_count >= 10
-            )
-
-            confidence_ok = (
-                audio_confidence >= 0.75
-            )
 
             st.write(
                 f"{'✅' if transcript_ok else '❌'} "
                 "**Rule 1: Transcript Payload**"
             )
+
+
+            # Rule 2
+            description_word_count = len(
+                audio_desc_txt.split()
+            )
+
+
+            description_ok = (
+                description_word_count >= 10
+            )
+
 
             st.write(
                 f"{'✅' if description_ok else '❌'} "
@@ -1199,17 +1336,31 @@ Do not invent sounds or events.
                 f"({description_word_count} words)"
             )
 
+
+            # Rule 3
+            confidence_ok = (
+                audio_confidence >= 0.75
+            )
+
+
             st.write(
                 f"{'✅' if confidence_ok else '❌'} "
                 "**Rule 3: AI Confidence Baseline** "
                 f"({audio_confidence * 100:.1f}%)"
             )
 
+
             st.markdown("---")
+
+
+            # ------------------------------------------------
+            # AUDIO AUDITOR
+            # ------------------------------------------------
 
             st.markdown(
                 "#### 🎛️ Data Auditor Console"
             )
+
 
             audio_verdict = st.radio(
                 "Pipeline Routing Action:",
@@ -1221,10 +1372,12 @@ Do not invent sounds or events.
                 key="audio_verdict"
             )
 
+
             audio_notes = st.text_input(
                 "Audio Auditor Quality Log Entries:",
                 key="audio_notes"
             )
+
 
             if st.button(
                 "Commit Audio Record",
@@ -1233,27 +1386,54 @@ Do not invent sounds or events.
 
                 st.session_state.audio_qc_log.append(
                     {
-                        "Filename": uploaded_audio.name,
-                        "Modality": "Audio",
-                        "Language": target_lang,
-                        "Description Lines": description_lines,
-                        "Confidence": audio_confidence,
-                        "Verdict": audio_verdict,
-                        "Notes": (
-                            audio_notes
-                            if audio_notes
-                            else "Verified Audio Asset"
-                        )
+                        "Filename":
+                            uploaded_audio.name,
+
+                        "Modality":
+                            "Audio",
+
+                        "Language":
+                            target_lang,
+
+                        "Description Lines":
+                            description_lines,
+
+                        "Confidence":
+                            audio_confidence,
+
+                        "Model":
+                            st.session_state.audio_result.get(
+                                "model",
+                                MODEL_NAME
+                            ),
+
+                        "Verdict":
+                            audio_verdict,
+
+                        "Notes":
+                            (
+                                audio_notes
+                                if audio_notes
+                                else "Verified Audio Asset"
+                            )
                     }
                 )
 
+
                 st.success(
-                    "✅ Audio record successfully verified and logged!"
+                    "✅ Audio record successfully "
+                    "verified and logged!"
                 )
+
+
+        # ----------------------------------------------------
+        # AUDIO MANIFEST
+        # ----------------------------------------------------
 
         st.markdown(
             "### 📊 Active Batch Audio Manifest"
         )
+
 
         if st.session_state.audio_qc_log:
 
@@ -1261,14 +1441,19 @@ Do not invent sounds or events.
                 st.session_state.audio_qc_log
             )
 
+
             st.dataframe(
                 df_audio,
                 use_container_width=True
             )
 
-            csv_audio = df_audio.to_csv(
-                index=False
-            ).encode("utf-8")
+
+            csv_audio = (
+                df_audio
+                .to_csv(index=False)
+                .encode("utf-8")
+            )
+
 
             st.download_button(
                 "📥 Export Audio Manifest (CSV)",
@@ -1277,8 +1462,10 @@ Do not invent sounds or events.
                 "text/csv"
             )
 
+
         else:
 
             st.caption(
-                "No dynamic audio rows logged in this batch yet."
+                "No dynamic audio rows logged "
+                "in this batch yet."
             )

@@ -593,7 +593,7 @@ def run_image_qc(result):
         "details": f"{actual_lines}/{required_lines} lines",
     })
 
-    confidence = result["confidence"]
+confidence = result.get("confidence")
 
     if confidence is None:
         confidence_ok = False
@@ -642,7 +642,7 @@ def run_audio_qc(result):
         "details": f"{actual_lines}/{required_lines} lines",
     })
 
-    confidence = result["confidence"]
+    confidence = result.get("confidence")
 
     if confidence is None:
         confidence_ok = False
@@ -1194,7 +1194,7 @@ else:
             # CONFIDENCE
             # ------------------------------------------------
 
-            confidence = result["confidence"]
+            confidence = result.get("confidence")
 
             if confidence is not None:
 

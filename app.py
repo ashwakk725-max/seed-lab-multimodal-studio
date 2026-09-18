@@ -136,9 +136,9 @@ elif studio_mode == "🔊 Audio Data Studio":
         if uploaded_audio is not None:
             st.audio(uploaded_audio, format=f"audio/{uploaded_audio.name.split('.')[-1]}")
             
-            transcript = "No text found."
-            translation = "No translation available."
-            audio_description = "Processing track..."
+            transcript = "Processing track..."
+            translation = "Translating text..."
+            audio_description = "Analyzing track properties..."
             audio_confidence = 0.95
             
             if API_KEY != "":
@@ -155,29 +155,31 @@ elif studio_mode == "🔊 Audio Data Studio":
 
                         prompt = f"""
                         Analyze this audio track carefully for a data engineering pipeline. 
-                        Return output strictly matching this JSON template:
-                        {{
-                            "transcript": "Write the exact song lyrics or spoken text here. If none, say background music.",
-                            "translation": "Translate that text cleanly into {target_lang}.",
-                            "audio_description": "Describe the instruments, music genre, background noises, and audio clarity here.",
-                            "confidence_score": 0.95
-                        }}
-                        Return raw JSON string only. Do not use markdown syntax.
+                        Provide your comprehensive breakdown using these exact string tags:
+
+                        [START_TRANSCRIPT]
+                        List any song lyrics or clear spoken sentences you extract. If it is only background music or an instrumental track, type: 'Background audio stream track detected.'
+                        [END_TRANSCRIPT]
+
+                        [START_TRANSLATION]
+                        Translate the text you just wrote above accurately into {target_lang}.
+                        [END_TRANSLATION]
+
+                        [START_DESCRIPTION]
+                        Describe the audio track properties: the instruments heard, music genre, background noises, speaker emotions, tempo, and overall signal clarity.
+                        [END_DESCRIPTION]
                         """
                         response = model.generate_content([prompt, audio_payload])
-                        raw_response_text = response.text.replace("```json", "").replace("```", "").strip()
-                        data = json.loads(raw_response_text)
+                        res_text = response.text
                         
-                        transcript = data.get("transcript", "No speech detected.")
-                        translation = data.get("translation", "No translation available.")
-                        audio_description = data.get("audio_description", "No acoustic description available.")
-                        audio_confidence = data.get("confidence_score", 0.92)
-                    except Exception as e:
-                        transcript = "Processing Complete"
-                        translation = f"Translated to {target_lang}"
-                        audio_description = "Acoustic stream track parsed successfully into vectors."
-                        if 'response' in locals() and hasattr(response, 'text') and len(response.text) > 10:
-                            audio_description = f"Track Summary Layout: {response.text[:220]}"
-                        audio_confidence = 0.88
-                
-                raw_speech = st.text_area("1. Spoken Transcript (Live ASR)", value=transcript, height=70)
+                        # Direct, error-proof text matching strategy
+                        if "[START_TRANSCRIPT]" in res_text and "[END_TRANSCRIPT]" in res_text:
+                            transcript = res_text.split("[START_TRANSCRIPT]")[1].split("[END_TRANSCRIPT]")[0].strip()
+                        
+                        if "[START_TRANSLATION]" in res_text and "[END_TRANSLATION]" in res_text:
+                            translation = res_text.split("[START_TRANSLATION]")[1].split("[END_TRANSLATION]")[0].strip()
+                        
+                        if "[START_DESCRIPTION]" in res_text and "[END_DESCRIPTION]" in res_text:
+                            audio_description = res_text.split("[START_DESCRIPTION]")[1].split("[END_DESCRIPTION]")[0].strip()
+                        else:
+                            # Direct fallback if the model dumps raw content text without using tags perfectly

@@ -1,4 +1,3 @@
-````python
 import streamlit as st
 import pandas as pd
 from PIL import Image
@@ -652,4 +651,3 @@ Important:
             st.caption(
                 "No dynamic audio rows logged in this batch yet."
             )
-````

@@ -1,7 +1,13 @@
 import io
 import json
+import os
 import re
+import sqlite3
 import time
+import hashlib
+import hmac
+import base64
+from pathlib import Path
 
 import pandas as pd
 import streamlit as st
@@ -23,6 +29,20 @@ st.set_page_config(
 
 
 # ============================================================
+# PATHS
+# ============================================================
+
+BASE_DIR = Path(__file__).resolve().parent
+
+DATA_DIR = BASE_DIR / "seed_lab_data"
+PROFILE_DIR = DATA_DIR / "profiles"
+DB_PATH = DATA_DIR / "users.db"
+
+DATA_DIR.mkdir(exist_ok=True)
+PROFILE_DIR.mkdir(exist_ok=True)
+
+
+# ============================================================
 # GREEN THEME
 # ============================================================
 
@@ -30,25 +50,16 @@ st.markdown(
     """
     <style>
 
-    /* =========================
-       MAIN BACKGROUND
-       ========================= */
-
     .stApp {
         background: #f3faf7;
         color: #17352d;
     }
 
-    .main .block-container {
+    .block-container {
         max-width: 1450px;
         padding-top: 2rem;
         padding-bottom: 3rem;
     }
-
-
-    /* =========================
-       SIDEBAR
-       ========================= */
 
     [data-testid="stSidebar"] {
         background: #ffffff;
@@ -61,18 +72,10 @@ st.markdown(
         color: #174d3b !important;
     }
 
-    [data-testid="stSidebar"] p {
-        color: #5d756c !important;
-    }
-
+    [data-testid="stSidebar"] p,
     [data-testid="stSidebar"] label {
-        color: #24483d !important;
+        color: #3f5f55 !important;
     }
-
-
-    /* =========================
-       HEADINGS
-       ========================= */
 
     h1 {
         color: #174d3b !important;
@@ -91,19 +94,9 @@ st.markdown(
         color: #3f5f55;
     }
 
-
-    /* =========================
-       CAPTIONS
-       ========================= */
-
     [data-testid="stCaptionContainer"] {
         color: #6b837a !important;
     }
-
-
-    /* =========================
-       METRICS
-       ========================= */
 
     [data-testid="stMetric"] {
         background: #ffffff;
@@ -121,11 +114,6 @@ st.markdown(
         color: #174d3b !important;
     }
 
-
-    /* =========================
-       FILE UPLOADER
-       ========================= */
-
     [data-testid="stFileUploader"] {
         background: #ffffff;
         border: 1px dashed #82b9a3;
@@ -137,11 +125,6 @@ st.markdown(
         background: #f8fcfa;
         border-radius: 12px;
     }
-
-
-    /* =========================
-       BUTTONS
-       ========================= */
 
     .stButton > button,
     .stDownloadButton > button {
@@ -171,44 +154,23 @@ st.markdown(
         color: #ffffff !important;
     }
 
-
-    /* =========================
-       TEXT AREAS
-       ========================= */
-
+    input,
     textarea {
         background: #ffffff !important;
         color: #183c31 !important;
+    }
+
+    textarea {
         border: 1px solid #cfe4da !important;
         border-radius: 10px !important;
     }
 
-    textarea:disabled {
-        color: #284d41 !important;
-        -webkit-text-fill-color: #284d41 !important;
-        opacity: 1 !important;
-    }
-
-
-    /* =========================
-       INPUTS
-       ========================= */
-
-    input {
-        background: #ffffff !important;
-        color: #183c31 !important;
-    }
-
+    [data-testid="stTextInput"] input,
     [data-testid="stNumberInput"] input {
         background: #ffffff !important;
         color: #183c31 !important;
         border-color: #cfe4da !important;
     }
-
-
-    /* =========================
-       SELECT BOX
-       ========================= */
 
     [data-baseweb="select"] > div {
         background: #ffffff !important;
@@ -216,23 +178,9 @@ st.markdown(
         color: #183c31 !important;
     }
 
-    [data-baseweb="select"] {
-        color: #183c31 !important;
-    }
-
-
-    /* =========================
-       RADIO
-       ========================= */
-
     [data-testid="stRadio"] label {
         color: #24483d !important;
     }
-
-
-    /* =========================
-       TABS
-       ========================= */
 
     button[data-baseweb="tab"] {
         color: #5a7169 !important;
@@ -243,21 +191,11 @@ st.markdown(
         font-weight: 700;
     }
 
-
-    /* =========================
-       DATAFRAME
-       ========================= */
-
     [data-testid="stDataFrame"] {
         background: #ffffff;
         border: 1px solid #d7ebe2;
         border-radius: 12px;
     }
-
-
-    /* =========================
-       EXPANDER
-       ========================= */
 
     [data-testid="stExpander"] {
         background: #ffffff;
@@ -265,42 +203,12 @@ st.markdown(
         border-radius: 12px;
     }
 
-
-    /* =========================
-       ALERTS
-       ========================= */
-
     [data-testid="stAlert"] {
         border-radius: 10px;
     }
 
-
-    /* =========================
-       DIVIDERS
-       ========================= */
-
     hr {
         border-color: #d7ebe2 !important;
-    }
-
-
-    /* =========================
-       AUDIO PLAYER
-       ========================= */
-
-    audio {
-        width: 100%;
-    }
-
-
-    /* =========================
-       CODE
-       ========================= */
-
-    pre {
-        background: #edf6f1 !important;
-        color: #183c31 !important;
-        border-radius: 10px;
     }
 
     </style>
@@ -310,14 +218,936 @@ st.markdown(
 
 
 # ============================================================
-# GEMINI CONFIGURATION
+# DATABASE
 # ============================================================
 
-API_KEY = st.secrets.get("GEMINI_API_KEY", "")
+def get_connection():
+    conn = sqlite3.connect(
+        DB_PATH,
+        check_same_thread=False,
+    )
+
+    conn.row_factory = sqlite3.Row
+
+    return conn
+
+
+def init_database():
+
+    conn = get_connection()
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            email TEXT NOT NULL UNIQUE,
+            password_hash TEXT NOT NULL,
+            salt TEXT NOT NULL,
+            profile_picture TEXT,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+
+    conn.commit()
+    conn.close()
+
+
+init_database()
+
+
+# ============================================================
+# PASSWORD SECURITY
+# ============================================================
+
+def hash_password(password):
+
+    salt = os.urandom(16)
+
+    password_hash = hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode("utf-8"),
+        salt,
+        120000,
+    )
+
+    return (
+        base64.b64encode(password_hash).decode(),
+        base64.b64encode(salt).decode(),
+    )
+
+
+def verify_password(
+    password,
+    stored_hash,
+    stored_salt,
+):
+
+    try:
+
+        salt = base64.b64decode(
+            stored_salt
+        )
+
+        expected_hash = hashlib.pbkdf2_hmac(
+            "sha256",
+            password.encode("utf-8"),
+            salt,
+            120000,
+        )
+
+        expected_hash = base64.b64encode(
+            expected_hash
+        ).decode()
+
+        return hmac.compare_digest(
+            expected_hash,
+            stored_hash,
+        )
+
+    except Exception:
+
+        return False
+
+
+# ============================================================
+# USER DATABASE FUNCTIONS
+# ============================================================
+
+def create_user(
+    name,
+    email,
+    password,
+    profile_picture=None,
+):
+
+    conn = get_connection()
+
+    try:
+
+        password_hash, salt = hash_password(
+            password
+        )
+
+        created_at = time.strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
+
+        cursor = conn.execute(
+            """
+            INSERT INTO users
+            (
+                name,
+                email,
+                password_hash,
+                salt,
+                profile_picture,
+                created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                name.strip(),
+                email.strip().lower(),
+                password_hash,
+                salt,
+                profile_picture,
+                created_at,
+            ),
+        )
+
+        conn.commit()
+
+        user_id = cursor.lastrowid
+
+        return user_id, None
+
+    except sqlite3.IntegrityError:
+
+        return None, "An account with this email already exists."
+
+    except Exception as error:
+
+        return None, str(error)
+
+    finally:
+
+        conn.close()
+
+
+def authenticate_user(
+    email,
+    password,
+):
+
+    conn = get_connection()
+
+    user = conn.execute(
+        """
+        SELECT *
+        FROM users
+        WHERE email = ?
+        """,
+        (
+            email.strip().lower(),
+        ),
+    ).fetchone()
+
+    conn.close()
+
+    if not user:
+
+        return None
+
+    if verify_password(
+        password,
+        user["password_hash"],
+        user["salt"],
+    ):
+
+        return dict(user)
+
+    return None
+
+
+def get_user(user_id):
+
+    conn = get_connection()
+
+    user = conn.execute(
+        """
+        SELECT *
+        FROM users
+        WHERE id = ?
+        """,
+        (user_id,),
+    ).fetchone()
+
+    conn.close()
+
+    if user:
+
+        return dict(user)
+
+    return None
+
+
+def update_user(
+    user_id,
+    name,
+    profile_picture=None,
+):
+
+    conn = get_connection()
+
+    if profile_picture is not None:
+
+        conn.execute(
+            """
+            UPDATE users
+            SET name = ?,
+                profile_picture = ?
+            WHERE id = ?
+            """,
+            (
+                name.strip(),
+                profile_picture,
+                user_id,
+            ),
+        )
+
+    else:
+
+        conn.execute(
+            """
+            UPDATE users
+            SET name = ?
+            WHERE id = ?
+            """,
+            (
+                name.strip(),
+                user_id,
+            ),
+        )
+
+    conn.commit()
+    conn.close()
+
+
+def change_password(
+    user_id,
+    new_password,
+):
+
+    password_hash, salt = hash_password(
+        new_password
+    )
+
+    conn = get_connection()
+
+    conn.execute(
+        """
+        UPDATE users
+        SET password_hash = ?,
+            salt = ?
+        WHERE id = ?
+        """,
+        (
+            password_hash,
+            salt,
+            user_id,
+        ),
+    )
+
+    conn.commit()
+    conn.close()
+
+
+# ============================================================
+# SESSION STATE
+# ============================================================
+
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+
+if "user_id" not in st.session_state:
+    st.session_state.user_id = None
+
+if "auth_page" not in st.session_state:
+    st.session_state.auth_page = "Login"
+
+if "image_result" not in st.session_state:
+    st.session_state.image_result = None
+
+if "audio_result" not in st.session_state:
+    st.session_state.audio_result = None
+
+if "manifest" not in st.session_state:
+    st.session_state.manifest = []
+
+if "app_mode" not in st.session_state:
+    st.session_state.app_mode = "Image Data Studio"
+
+if "settings_open" not in st.session_state:
+    st.session_state.settings_open = False
+
+
+# ============================================================
+# AUTHENTICATION SCREEN
+# ============================================================
+
+def authentication_screen():
+
+    st.markdown(
+        "",
+        unsafe_allow_html=True,
+    )
+
+    st.title(
+        "🌿 SEED Lab"
+    )
+
+    st.subheader(
+        "Multimodal Data QC Studio"
+    )
+
+    st.caption(
+        "Secure workspace for multimodal data annotation and quality control."
+    )
+
+    st.divider()
+
+    login_tab, register_tab = st.tabs(
+        [
+            "Login",
+            "Create Account",
+        ]
+    )
+
+    # ========================================================
+    # LOGIN
+    # ========================================================
+
+    with login_tab:
+
+        st.subheader(
+            "Welcome back"
+        )
+
+        email = st.text_input(
+            "Email",
+            placeholder="you@example.com",
+            key="login_email",
+        )
+
+        password = st.text_input(
+            "Password",
+            type="password",
+            placeholder="Enter your password",
+            key="login_password",
+        )
+
+        if st.button(
+            "Login",
+            type="primary",
+            use_container_width=True,
+        ):
+
+            if not email or not password:
+
+                st.warning(
+                    "Please enter your email and password."
+                )
+
+            else:
+
+                user = authenticate_user(
+                    email,
+                    password,
+                )
+
+                if user:
+
+                    st.session_state.logged_in = True
+                    st.session_state.user_id = user["id"]
+                    st.session_state.auth_page = "Login"
+
+                    st.success(
+                        "Login successful."
+                    )
+
+                    time.sleep(0.5)
+
+                    st.rerun()
+
+                else:
+
+                    st.error(
+                        "Invalid email or password."
+                    )
+
+    # ========================================================
+    # REGISTER
+    # ========================================================
+
+    with register_tab:
+
+        st.subheader(
+            "Create your SEED Lab account"
+        )
+
+        name = st.text_input(
+            "Full name",
+            placeholder="Enter your name",
+            key="register_name",
+        )
+
+        email = st.text_input(
+            "Email address",
+            placeholder="you@example.com",
+            key="register_email",
+        )
+
+        password = st.text_input(
+            "Create password",
+            type="password",
+            placeholder="Create a secure password",
+            key="register_password",
+        )
+
+        confirm_password = st.text_input(
+            "Confirm password",
+            type="password",
+            placeholder="Re-enter your password",
+            key="register_confirm_password",
+        )
+
+        profile_picture = st.file_uploader(
+            "Profile picture (optional)",
+            type=[
+                "jpg",
+                "jpeg",
+                "png",
+                "webp",
+            ],
+            key="register_profile_picture",
+        )
+
+        if profile_picture:
+
+            st.image(
+                profile_picture,
+                width=140,
+            )
+
+        if st.button(
+            "Create Account",
+            type="primary",
+            use_container_width=True,
+        ):
+
+            if not name.strip():
+
+                st.warning(
+                    "Please enter your name."
+                )
+
+            elif not email.strip():
+
+                st.warning(
+                    "Please enter your email."
+                )
+
+            elif "@" not in email:
+
+                st.warning(
+                    "Please enter a valid email address."
+                )
+
+            elif len(password) < 8:
+
+                st.warning(
+                    "Password must contain at least 8 characters."
+                )
+
+            elif password != confirm_password:
+
+                st.error(
+                    "Passwords do not match."
+                )
+
+            else:
+
+                saved_picture = None
+
+                if profile_picture:
+
+                    extension = (
+                        Path(
+                            profile_picture.name
+                        ).suffix.lower()
+                    )
+
+                    filename = (
+                        f"pending_{int(time.time())}{extension}"
+                    )
+
+                    picture_path = (
+                        PROFILE_DIR / filename
+                    )
+
+                    with open(
+                        picture_path,
+                        "wb",
+                    ) as file:
+
+                        file.write(
+                            profile_picture.getvalue()
+                        )
+
+                    saved_picture = str(
+                        picture_path
+                    )
+
+                user_id, error = create_user(
+                    name,
+                    email,
+                    password,
+                    saved_picture,
+                )
+
+                if error:
+
+                    if saved_picture:
+
+                        try:
+                            os.remove(
+                                saved_picture
+                            )
+                        except Exception:
+                            pass
+
+                    st.error(error)
+
+                else:
+
+                    st.success(
+                        "Account created successfully. You can now log in."
+                    )
+
+
+# ============================================================
+# SHOW LOGIN IF NOT AUTHENTICATED
+# ============================================================
+
+if not st.session_state.logged_in:
+
+    authentication_screen()
+
+    st.stop()
+
+
+# ============================================================
+# CURRENT USER
+# ============================================================
+
+current_user = get_user(
+    st.session_state.user_id
+)
+
+if not current_user:
+
+    st.session_state.logged_in = False
+    st.session_state.user_id = None
+
+    st.rerun()
+
+
+# ============================================================
+# PROFILE IMAGE HELPER
+# ============================================================
+
+def display_profile_picture(
+    user,
+    width=80,
+):
+
+    picture = user.get(
+        "profile_picture"
+    )
+
+    if picture and os.path.exists(
+        picture
+    ):
+
+        try:
+
+            st.image(
+                picture,
+                width=width,
+            )
+
+            return
+
+        except Exception:
+            pass
+
+    st.write("👤")
+
+
+# ============================================================
+# SIDEBAR
+# ============================================================
+
+with st.sidebar:
+
+    st.title(
+        "🌿 SEED Lab"
+    )
+
+    st.caption(
+        "Multimodal Data QC Studio"
+    )
+
+    st.divider()
+
+    display_profile_picture(
+        current_user,
+        width=75,
+    )
+
+    st.write(
+        f"**{current_user['name']}**"
+    )
+
+    st.caption(
+        current_user["email"]
+    )
+
+    st.divider()
+
+    st.subheader(
+        "Studio"
+    )
+
+    selected_mode = st.radio(
+        "Workspace",
+        [
+            "Image Data Studio",
+            "Audio Data Studio",
+            "Auditor Console",
+        ],
+        index=[
+            "Image Data Studio",
+            "Audio Data Studio",
+            "Auditor Console",
+        ].index(
+            st.session_state.app_mode
+        ),
+        label_visibility="collapsed",
+    )
+
+    st.session_state.app_mode = selected_mode
+
+    st.divider()
+
+    # ========================================================
+    # SETTINGS AT BOTTOM LEFT
+    # ========================================================
+
+    st.subheader(
+        "⚙️ Settings"
+    )
+
+    settings_choice = st.radio(
+        "Settings",
+        [
+            "Profile",
+            "Account",
+        ],
+        label_visibility="collapsed",
+    )
+
+    if settings_choice == "Profile":
+
+        if st.button(
+            "Open Profile",
+            use_container_width=True,
+        ):
+
+            st.session_state.settings_open = True
+
+    if settings_choice == "Account":
+
+        if st.button(
+            "Logout",
+            use_container_width=True,
+        ):
+
+            st.session_state.logged_in = False
+            st.session_state.user_id = None
+            st.session_state.image_result = None
+            st.session_state.audio_result = None
+            st.session_state.manifest = []
+
+            st.rerun()
+
+    st.divider()
+
+    st.caption(
+        "SEED Lab Multimodal Studio"
+    )
+
+    st.caption(
+        "Secure user workspace"
+    )
+
+
+# ============================================================
+# PROFILE / SETTINGS PAGE
+# ============================================================
+
+if st.session_state.settings_open:
+
+    st.title(
+        "Profile & Settings"
+    )
+
+    st.caption(
+        "Manage your personal profile and account settings."
+    )
+
+    if st.button(
+        "← Back to Dashboard"
+    ):
+
+        st.session_state.settings_open = False
+
+        st.rerun()
+
+    st.divider()
+
+    profile_tab, account_tab = st.tabs(
+        [
+            "Profile",
+            "Account Security",
+        ]
+    )
+
+    # ========================================================
+    # PROFILE
+    # ========================================================
+
+    with profile_tab:
+
+        st.subheader(
+            "Your Profile"
+        )
+
+        left, right = st.columns(
+            [1, 2]
+        )
+
+        with left:
+
+            display_profile_picture(
+                current_user,
+                width=180,
+            )
+
+        with right:
+
+            st.write(
+                f"**Email:** {current_user['email']}"
+            )
+
+            st.write(
+                f"**Account created:** {current_user['created_at']}"
+            )
+
+        st.divider()
+
+        new_name = st.text_input(
+            "Name",
+            value=current_user["name"],
+        )
+
+        new_picture = st.file_uploader(
+            "Change profile picture",
+            type=[
+                "jpg",
+                "jpeg",
+                "png",
+                "webp",
+            ],
+        )
+
+        if new_picture:
+
+            st.image(
+                new_picture,
+                width=180,
+            )
+
+        if st.button(
+            "Save Profile",
+            type="primary",
+        ):
+
+            picture_path = None
+
+            if new_picture:
+
+                extension = (
+                    Path(
+                        new_picture.name
+                    ).suffix.lower()
+                )
+
+                filename = (
+                    f"user_{current_user['id']}_{int(time.time())}{extension}"
+                )
+
+                picture_path = (
+                    PROFILE_DIR / filename
+                )
+
+                with open(
+                    picture_path,
+                    "wb",
+                ) as file:
+
+                    file.write(
+                        new_picture.getvalue()
+                    )
+
+                picture_path = str(
+                    picture_path
+                )
+
+            update_user(
+                current_user["id"],
+                new_name,
+                picture_path,
+            )
+
+            st.success(
+                "Profile updated successfully."
+            )
+
+            time.sleep(0.5)
+
+            st.rerun()
+
+    # ========================================================
+    # ACCOUNT SECURITY
+    # ========================================================
+
+    with account_tab:
+
+        st.subheader(
+            "Change Password"
+        )
+
+        new_password = st.text_input(
+            "New password",
+            type="password",
+        )
+
+        confirm_new_password = st.text_input(
+            "Confirm new password",
+            type="password",
+        )
+
+        if st.button(
+            "Change Password",
+            type="primary",
+        ):
+
+            if len(new_password) < 8:
+
+                st.warning(
+                    "Password must contain at least 8 characters."
+                )
+
+            elif new_password != confirm_new_password:
+
+                st.error(
+                    "Passwords do not match."
+                )
+
+            else:
+
+                change_password(
+                    current_user["id"],
+                    new_password,
+                )
+
+                st.success(
+                    "Password changed successfully."
+                )
+
+    st.stop()
+
+
+# ============================================================
+# GEMINI CONFIG
+# ============================================================
+
+API_KEY = st.secrets.get(
+    "GEMINI_API_KEY",
+    "",
+)
 
 if API_KEY:
-    client = genai.Client(api_key=API_KEY)
+
+    client = genai.Client(
+        api_key=API_KEY
+    )
+
 else:
+
     client = None
 
 
@@ -331,30 +1161,14 @@ FALLBACK_MODELS = [
 
 
 # ============================================================
-# SESSION STATE
-# ============================================================
-
-if "image_result" not in st.session_state:
-    st.session_state.image_result = None
-
-if "audio_result" not in st.session_state:
-    st.session_state.audio_result = None
-
-if "manifest" not in st.session_state:
-    st.session_state.manifest = []
-
-if "last_error" not in st.session_state:
-    st.session_state.last_error = None
-
-
-# ============================================================
-# HELPER FUNCTIONS
+# GEMINI HELPERS
 # ============================================================
 
 def retryable(error):
+
     message = str(error).lower()
 
-    retry_words = [
+    words = [
         "503",
         "unavailable",
         "high demand",
@@ -366,15 +1180,24 @@ def retryable(error):
         "timeout",
     ]
 
-    return any(word in message for word in retry_words)
+    return any(
+        word in message
+        for word in words
+    )
 
 
 def response_text(response):
+
     if response is None:
         return ""
 
     try:
-        text = getattr(response, "text", None)
+
+        text = getattr(
+            response,
+            "text",
+            None,
+        )
 
         if text:
             return str(text).strip()
@@ -383,9 +1206,15 @@ def response_text(response):
         pass
 
     try:
-        candidates = getattr(response, "candidates", [])
+
+        candidates = getattr(
+            response,
+            "candidates",
+            [],
+        )
 
         if candidates:
+
             content = getattr(
                 candidates[0],
                 "content",
@@ -393,6 +1222,7 @@ def response_text(response):
             )
 
             if content:
+
                 parts = getattr(
                     content,
                     "parts",
@@ -402,6 +1232,7 @@ def response_text(response):
                 output = []
 
                 for part in parts:
+
                     text_part = getattr(
                         part,
                         "text",
@@ -409,11 +1240,14 @@ def response_text(response):
                     )
 
                     if text_part:
+
                         output.append(
                             str(text_part)
                         )
 
-                return "\n".join(output).strip()
+                return "\n".join(
+                    output
+                ).strip()
 
     except Exception:
         pass
@@ -422,6 +1256,7 @@ def response_text(response):
 
 
 def parse_json(text):
+
     if not text:
         return None
 
@@ -440,23 +1275,32 @@ def parse_json(text):
         cleaned,
     )
 
-    cleaned = cleaned.strip()
-
     try:
-        return json.loads(cleaned)
+
+        return json.loads(
+            cleaned
+        )
 
     except Exception:
         pass
 
-    start = cleaned.find("{")
-    end = cleaned.rfind("}")
+    start = cleaned.find(
+        "{"
+    )
+
+    end = cleaned.rfind(
+        "}"
+    )
 
     if start != -1 and end != -1:
 
-        candidate = cleaned[start:end + 1]
-
         try:
-            return json.loads(candidate)
+
+            return json.loads(
+                cleaned[
+                    start:end + 1
+                ]
+            )
 
         except Exception:
             pass
@@ -464,23 +1308,37 @@ def parse_json(text):
     return None
 
 
-def text_value(data, key, default=""):
-    if not isinstance(data, dict):
+def text_value(
+    data,
+    key,
+    default="",
+):
+
+    if not isinstance(
+        data,
+        dict,
+    ):
+
         return default
 
-    value = data.get(key, default)
+    value = data.get(
+        key,
+        default,
+    )
 
     if value is None:
         return default
 
-    if isinstance(value, str):
-        return value.strip()
-
-    return str(value)
+    return str(value).strip()
 
 
 def description_lines(data):
-    if not isinstance(data, dict):
+
+    if not isinstance(
+        data,
+        dict,
+    ):
+
         return []
 
     value = data.get(
@@ -488,7 +1346,10 @@ def description_lines(data):
         [],
     )
 
-    if isinstance(value, list):
+    if isinstance(
+        value,
+        list,
+    ):
 
         return [
             str(item).strip()
@@ -496,7 +1357,10 @@ def description_lines(data):
             if str(item).strip()
         ]
 
-    if isinstance(value, str):
+    if isinstance(
+        value,
+        str,
+    ):
 
         return [
             line.strip()
@@ -508,10 +1372,17 @@ def description_lines(data):
 
 
 def confidence(data):
-    if not isinstance(data, dict):
+
+    if not isinstance(
+        data,
+        dict,
+    ):
+
         return None
 
-    value = data.get("confidence")
+    value = data.get(
+        "confidence"
+    )
 
     if value is None:
         return None
@@ -529,19 +1400,24 @@ def confidence(data):
         )
 
     except Exception:
+
         return None
 
 
 def json_config():
+
     return types.GenerateContentConfig(
         temperature=0.2,
         response_mime_type="application/json",
     )
 
 
-def generate_with_fallback(contents):
+def generate_with_fallback(
+    contents
+):
 
     if client is None:
+
         return (
             None,
             None,
@@ -554,7 +1430,9 @@ def generate_with_fallback(contents):
 
     last_error = None
 
-    for model_index, model in enumerate(models):
+    for model_index, model in enumerate(
+        models
+    ):
 
         for attempt in range(2):
 
@@ -566,9 +1444,10 @@ def generate_with_fallback(contents):
                     config=json_config(),
                 )
 
-                text = response_text(response)
+                if response_text(
+                    response
+                ):
 
-                if text:
                     return (
                         response,
                         model,
@@ -612,6 +1491,7 @@ def add_manifest(
             "Timestamp": time.strftime(
                 "%Y-%m-%d %H:%M:%S"
             ),
+            "User": current_user["email"],
             "Mode": mode,
             "File": filename,
             "Requested Lines": requested_lines,
@@ -627,54 +1507,7 @@ def add_manifest(
 
 
 # ============================================================
-# SIDEBAR
-# ============================================================
-
-with st.sidebar:
-
-    st.title("🌿 SEED Lab")
-
-    st.caption(
-        "Multimodal Data QC Studio"
-    )
-
-    st.divider()
-
-    mode = st.radio(
-        "Studio",
-        [
-            "Image Data Studio",
-            "Audio Data Studio",
-            "Auditor Console",
-        ],
-    )
-
-    st.divider()
-
-    st.subheader("System")
-
-    if API_KEY:
-        st.success(
-            "Gemini API connected"
-        )
-    else:
-        st.error(
-            "Gemini API key missing"
-        )
-
-    st.caption(
-        "AI-assisted data annotation and quality control"
-    )
-
-    st.divider()
-
-    st.caption(
-        "Image • Audio • OCR • Translation • QC"
-    )
-
-
-# ============================================================
-# MAIN HEADER
+# MAIN DASHBOARD HEADER
 # ============================================================
 
 st.title(
@@ -682,7 +1515,7 @@ st.title(
 )
 
 st.caption(
-    "Unified multimodal data annotation, translation and quality-control workspace"
+    f"Welcome, {current_user['name']} • Unified multimodal data annotation and quality-control workspace"
 )
 
 st.divider()
@@ -696,7 +1529,7 @@ if not API_KEY:
 
     st.warning(
         "GEMINI_API_KEY is not configured. "
-        "Add it to Streamlit Secrets before running analysis."
+        "Add it to Streamlit Secrets before running AI analysis."
     )
 
 
@@ -704,12 +1537,14 @@ if not API_KEY:
 # IMAGE DATA STUDIO
 # ============================================================
 
-if mode == "Image Data Studio":
+if st.session_state.app_mode == "Image Data Studio":
 
-    st.header("Image Data Studio")
+    st.header(
+        "Image Data Studio"
+    )
 
     st.caption(
-        "Extract text, translate content, generate visual descriptions and perform QC."
+        "OCR • Translation • Visual Description • Quality Control"
     )
 
     upload_col, lines_col = st.columns(
@@ -748,7 +1583,9 @@ if mode == "Image Data Studio":
         try:
 
             image = Image.open(
-                io.BytesIO(image_bytes)
+                io.BytesIO(
+                    image_bytes
+                )
             )
 
         except Exception as error:
@@ -769,7 +1606,9 @@ if mode == "Image Data Studio":
 
             with preview_col:
 
-                st.subheader("Image Preview")
+                st.subheader(
+                    "Image Preview"
+                )
 
                 st.image(
                     image,
@@ -799,13 +1638,11 @@ if mode == "Image Data Studio":
 
             st.divider()
 
-            analyze_image = st.button(
+            if st.button(
                 "Analyze Image",
                 type="primary",
                 use_container_width=True,
-            )
-
-            if analyze_image:
+            ):
 
                 if not API_KEY:
 
@@ -820,9 +1657,7 @@ You are a professional multimodal data annotation and quality-control assistant.
 
 Analyze the uploaded image.
 
-Return ONLY valid JSON.
-
-Required structure:
+Return ONLY valid JSON:
 
 {{
   "ocr_text": "all clearly readable text",
@@ -836,17 +1671,16 @@ Required structure:
 
 Rules:
 
-1. description_lines MUST contain exactly {image_description_count} lines.
+1. description_lines MUST contain exactly {image_description_count} separate lines.
 2. Every line must contain useful visual information.
 3. Do not number the lines.
-4. Do not combine lines.
-5. OCR should contain clearly readable text only.
+4. Do not combine multiple lines.
+5. Extract readable text accurately.
 6. If no readable text exists, use an empty string.
-7. Translation should translate the extracted text into English.
+7. Translate extracted text into English.
 8. If translation is not applicable, use an empty string.
 9. confidence must be a number from 0 to 1.
-10. Do not output markdown.
-11. Do not output explanations outside the JSON.
+10. Return JSON only.
 """
 
                     with st.spinner(
@@ -863,8 +1697,6 @@ Rules:
                         )
 
                     if error:
-
-                        st.session_state.last_error = error
 
                         st.error(
                             f"Image analysis failed: {error}"
@@ -883,7 +1715,7 @@ Rules:
                         if result is None:
 
                             st.error(
-                                "Gemini returned a response, but it could not be parsed."
+                                "Gemini response could not be parsed."
                             )
 
                             with st.expander(
@@ -902,22 +1734,20 @@ Rules:
                                 "filename": image_file.name,
                             }
 
-                            actual_lines = len(
-                                description_lines(
-                                    result
-                                )
-                            )
-
                             add_manifest(
                                 "Image",
                                 image_file.name,
                                 image_description_count,
-                                actual_lines,
+                                len(
+                                    description_lines(
+                                        result
+                                    )
+                                ),
                                 model_used,
                             )
 
                             st.success(
-                                f"Analysis completed using {model_used}"
+                                "Image analysis completed."
                             )
 
             # =================================================
@@ -926,19 +1756,12 @@ Rules:
 
             if st.session_state.image_result:
 
-                saved = (
+                result = (
                     st.session_state.image_result
-                )
-
-                result = saved.get(
-                    "data",
-                    {},
-                )
-
-                st.divider()
-
-                st.header(
-                    "Image Analysis Results"
+                    .get(
+                        "data",
+                        {},
+                    )
                 )
 
                 ocr = text_value(
@@ -959,9 +1782,15 @@ Rules:
                     result
                 )
 
-                m1, m2, m3 = st.columns(3)
+                st.divider()
 
-                with m1:
+                st.header(
+                    "Image Analysis Results"
+                )
+
+                c1, c2, c3 = st.columns(3)
+
+                with c1:
 
                     st.metric(
                         "OCR",
@@ -972,7 +1801,7 @@ Rules:
                         ),
                     )
 
-                with m2:
+                with c2:
 
                     st.metric(
                         "Translation",
@@ -983,7 +1812,7 @@ Rules:
                         ),
                     )
 
-                with m3:
+                with c3:
 
                     st.metric(
                         "Confidence",
@@ -994,20 +1823,16 @@ Rules:
                         ),
                     )
 
-                st.divider()
+                left, right = st.columns(2)
 
-                text_col, translation_col = st.columns(
-                    2
-                )
-
-                with text_col:
+                with left:
 
                     st.subheader(
                         "OCR Text"
                     )
 
                     st.text_area(
-                        "OCR output",
+                        "OCR",
                         value=(
                             ocr
                             if ocr
@@ -1018,14 +1843,14 @@ Rules:
                         label_visibility="collapsed",
                     )
 
-                with translation_col:
+                with right:
 
                     st.subheader(
                         "Translation"
                     )
 
                     st.text_area(
-                        "Translation output",
+                        "Translation",
                         value=(
                             translation
                             if translation
@@ -1042,21 +1867,13 @@ Rules:
                     f"AI Visual Description ({image_description_count} lines requested)"
                 )
 
-                if lines:
+                for index, line in enumerate(
+                    lines,
+                    start=1,
+                ):
 
-                    for index, line in enumerate(
-                        lines,
-                        start=1,
-                    ):
-
-                        st.write(
-                            f"**{index}.** {line}"
-                        )
-
-                else:
-
-                    st.warning(
-                        "No visual description was returned."
+                    st.write(
+                        f"**{index}.** {line}"
                     )
 
                 st.divider()
@@ -1065,7 +1882,9 @@ Rules:
                     "Quality Control"
                 )
 
-                actual_count = len(lines)
+                actual_count = len(
+                    lines
+                )
 
                 q1, q2, q3 = st.columns(3)
 
@@ -1113,14 +1932,14 @@ Rules:
 # AUDIO DATA STUDIO
 # ============================================================
 
-elif mode == "Audio Data Studio":
+elif st.session_state.app_mode == "Audio Data Studio":
 
     st.header(
         "Audio Data Studio"
     )
 
     st.caption(
-        "Transcribe audio, translate speech, generate audio descriptions and perform QC."
+        "Transcription • Translation • Audio Description • Quality Control"
     )
 
     upload_col, lines_col = st.columns(
@@ -1193,13 +2012,11 @@ elif mode == "Audio Data Studio":
 
         st.divider()
 
-        analyze_audio = st.button(
+        if st.button(
             "Analyze Audio",
             type="primary",
             use_container_width=True,
-        )
-
-        if analyze_audio:
+        ):
 
             if not API_KEY:
 
@@ -1239,9 +2056,7 @@ You are a professional multimodal data annotation and quality-control assistant.
 
 Analyze the uploaded audio.
 
-Return ONLY valid JSON.
-
-Required structure:
+Return ONLY valid JSON:
 
 {{
   "transcript": "complete understandable speech transcription",
@@ -1255,18 +2070,17 @@ Required structure:
 
 Rules:
 
-1. description_lines MUST contain exactly {audio_description_count} lines.
-2. Every line must contain useful information about the audio.
+1. description_lines MUST contain exactly {audio_description_count} separate lines.
+2. Every line must contain useful audio information.
 3. Do not number the lines.
 4. Do not combine lines.
 5. Describe identifiable speech, sounds, environment, events or other useful audio information.
 6. transcript should contain understandable speech.
-7. If there is no understandable speech, use an empty string.
+7. If no understandable speech exists, use an empty string.
 8. translation should be English.
 9. If translation is not applicable, use an empty string.
 10. confidence must be a number from 0 to 1.
-11. Do not output markdown.
-12. Do not output explanations outside JSON.
+11. Return JSON only.
 """
 
                     with st.spinner(
@@ -1283,8 +2097,6 @@ Rules:
                         )
 
                     if error:
-
-                        st.session_state.last_error = error
 
                         st.error(
                             f"Audio analysis failed: {error}"
@@ -1303,7 +2115,7 @@ Rules:
                         if result is None:
 
                             st.error(
-                                "Gemini returned a response, but it could not be parsed."
+                                "Gemini response could not be parsed."
                             )
 
                             with st.expander(
@@ -1322,22 +2134,20 @@ Rules:
                                 "filename": audio_file.name,
                             }
 
-                            actual_lines = len(
-                                description_lines(
-                                    result
-                                )
-                            )
-
                             add_manifest(
                                 "Audio",
                                 audio_file.name,
                                 audio_description_count,
-                                actual_lines,
+                                len(
+                                    description_lines(
+                                        result
+                                    )
+                                ),
                                 model_used,
                             )
 
                             st.success(
-                                f"Audio analysis completed using {model_used}"
+                                "Audio analysis completed."
                             )
 
     # ========================================================
@@ -1346,13 +2156,12 @@ Rules:
 
     if st.session_state.audio_result:
 
-        saved = (
+        result = (
             st.session_state.audio_result
-        )
-
-        result = saved.get(
-            "data",
-            {},
+            .get(
+                "data",
+                {},
+            )
         )
 
         transcript = text_value(
@@ -1379,9 +2188,9 @@ Rules:
             "Audio Analysis Results"
         )
 
-        m1, m2, m3 = st.columns(3)
+        c1, c2, c3 = st.columns(3)
 
-        with m1:
+        with c1:
 
             st.metric(
                 "Transcript",
@@ -1392,7 +2201,7 @@ Rules:
                 ),
             )
 
-        with m2:
+        with c2:
 
             st.metric(
                 "Translation",
@@ -1403,7 +2212,7 @@ Rules:
                 ),
             )
 
-        with m3:
+        with c3:
 
             st.metric(
                 "Confidence",
@@ -1414,13 +2223,9 @@ Rules:
                 ),
             )
 
-        st.divider()
+        left, right = st.columns(2)
 
-        transcript_col, translation_col = st.columns(
-            2
-        )
-
-        with transcript_col:
+        with left:
 
             st.subheader(
                 "Live Audio Transcript"
@@ -1431,14 +2236,14 @@ Rules:
                 value=(
                     transcript
                     if transcript
-                    else "No understandable speech was detected."
+                    else "No understandable speech detected."
                 ),
                 height=250,
                 disabled=True,
                 label_visibility="collapsed",
             )
 
-        with translation_col:
+        with right:
 
             st.subheader(
                 "Translation"
@@ -1462,21 +2267,13 @@ Rules:
             f"AI Audio Description ({audio_description_count} lines requested)"
         )
 
-        if lines:
+        for index, line in enumerate(
+            lines,
+            start=1,
+        ):
 
-            for index, line in enumerate(
-                lines,
-                start=1,
-            ):
-
-                st.write(
-                    f"**{index}.** {line}"
-                )
-
-        else:
-
-            st.warning(
-                "No audio description was returned."
+            st.write(
+                f"**{index}.** {line}"
             )
 
         st.divider()
@@ -1485,7 +2282,9 @@ Rules:
             "Quality Control"
         )
 
-        actual_count = len(lines)
+        actual_count = len(
+            lines
+        )
 
         q1, q2, q3 = st.columns(3)
 
@@ -1509,13 +2308,10 @@ Rules:
         with q2:
 
             if transcript:
-
                 st.success(
                     "Transcript: PASS"
                 )
-
             else:
-
                 st.info(
                     "Transcript: No speech"
                 )
@@ -1523,13 +2319,10 @@ Rules:
         with q3:
 
             if translation:
-
                 st.success(
                     "Translation: PASS"
                 )
-
             else:
-
                 st.info(
                     "Translation: N/A"
                 )
@@ -1554,8 +2347,7 @@ else:
     if not manifest:
 
         st.info(
-            "No analysis records available yet. "
-            "Run an Image or Audio analysis first."
+            "No analysis records available yet."
         )
 
     else:
@@ -1690,5 +2482,5 @@ else:
 st.divider()
 
 st.caption(
-    "🌿 SEED Lab Multimodal Studio • Image + Audio Data Quality Control"
+    "🌿 SEED Lab Multimodal Studio • Secure Multimodal Data Quality Control"
 )

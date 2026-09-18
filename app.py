@@ -183,7 +183,6 @@ elif studio_mode == "🔊 Audio Data Studio":
                             audio_description = res_text.split("[START_DESCRIPTION]")[1].split("[END_DESCRIPTION]")[0].strip()
                         else:
                             audio_description = res_text.strip()
-                            
-                    except Exception as e:
+                           
                     except Exception as e:
                         st.error(f"Audio processing error: {str(e)}")

@@ -185,8 +185,8 @@ elif studio_mode == "🔊 Audio Data Studio":
                         """
                         response = model.generate_content([prompt, audio_payload])
                         
-                        # CLEANED & RE-SPACED: Fixed the indentation crash
-                        raw_response_text = response.text.strip()
-                        raw_response_text = raw_response_text.replace("```json", "").replace("```", "").strip()
-                        
+                        raw_response_text = response.text.replace("```json", "").replace("```", "").strip()
                         data = json.loads(raw_response_text)
+                        
+                        transcript = data.get("transcript", "No speech detected.")
+                        translation = data.get("translation", "No translation available.")

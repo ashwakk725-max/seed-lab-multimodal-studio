@@ -2,7 +2,6 @@ import io
 import json
 import re
 import time
-import html
 
 import pandas as pd
 import streamlit as st
@@ -17,182 +16,290 @@ from google.genai import types
 
 st.set_page_config(
     page_title="SEED Lab Multimodal Studio",
-    page_icon="◈",
+    page_icon="🌿",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
 
 # ============================================================
-# SIMPLE CSS
-# IMPORTANT:
-# This is CSS ONLY. No visible HTML blocks are used in the UI.
+# GREEN THEME
 # ============================================================
 
 st.markdown(
     """
     <style>
 
-    /* Main application */
+    /* =========================
+       MAIN BACKGROUND
+       ========================= */
+
     .stApp {
-        background: #f5f7fb;
-        color: #172033;
+        background: #f3faf7;
+        color: #17352d;
     }
 
-    /* Sidebar */
-    [data-testid="stSidebar"] {
-        background: #ffffff;
-        border-right: 1px solid #dfe4ee;
-    }
-
-    [data-testid="stSidebar"] * {
-        color: #172033 !important;
-    }
-
-    /* Main content */
-    .block-container {
+    .main .block-container {
+        max-width: 1450px;
         padding-top: 2rem;
         padding-bottom: 3rem;
-        max-width: 1450px;
     }
 
-    /* Headings */
-    h1, h2, h3, h4 {
-        color: #172033 !important;
-        letter-spacing: -0.02em;
+
+    /* =========================
+       SIDEBAR
+       ========================= */
+
+    [data-testid="stSidebar"] {
+        background: #ffffff;
+        border-right: 1px solid #d8ebe3;
     }
 
-    /* Normal text */
-    p, label, span, div {
-        color: #25304a;
+    [data-testid="stSidebar"] h1,
+    [data-testid="stSidebar"] h2,
+    [data-testid="stSidebar"] h3 {
+        color: #174d3b !important;
     }
 
-    /* Captions */
+    [data-testid="stSidebar"] p {
+        color: #5d756c !important;
+    }
+
+    [data-testid="stSidebar"] label {
+        color: #24483d !important;
+    }
+
+
+    /* =========================
+       HEADINGS
+       ========================= */
+
+    h1 {
+        color: #174d3b !important;
+        font-weight: 750 !important;
+    }
+
+    h2 {
+        color: #1c5843 !important;
+    }
+
+    h3 {
+        color: #24634d !important;
+    }
+
+    p {
+        color: #3f5f55;
+    }
+
+
+    /* =========================
+       CAPTIONS
+       ========================= */
+
     [data-testid="stCaptionContainer"] {
-        color: #65708a !important;
+        color: #6b837a !important;
     }
 
-    /* Metrics */
+
+    /* =========================
+       METRICS
+       ========================= */
+
     [data-testid="stMetric"] {
         background: #ffffff;
-        border: 1px solid #dfe4ee;
-        padding: 18px;
+        border: 1px solid #d7ebe2;
         border-radius: 14px;
-        box-shadow: 0 3px 12px rgba(20, 35, 70, 0.06);
+        padding: 18px;
+        box-shadow: 0 3px 12px rgba(28, 91, 67, 0.06);
     }
 
     [data-testid="stMetricLabel"] {
-        color: #65708a !important;
+        color: #668078 !important;
     }
 
     [data-testid="stMetricValue"] {
-        color: #172033 !important;
+        color: #174d3b !important;
     }
 
-    /* File uploader */
+
+    /* =========================
+       FILE UPLOADER
+       ========================= */
+
     [data-testid="stFileUploader"] {
         background: #ffffff;
-        border: 1px dashed #9aa8c7;
+        border: 1px dashed #82b9a3;
         border-radius: 14px;
-        padding: 8px;
+        padding: 10px;
     }
 
-    [data-testid="stFileUploader"] * {
-        color: #25304a !important;
+    [data-testid="stFileUploaderDropzone"] {
+        background: #f8fcfa;
+        border-radius: 12px;
     }
 
-    /* Buttons */
+
+    /* =========================
+       BUTTONS
+       ========================= */
+
     .stButton > button,
     .stDownloadButton > button {
         border-radius: 10px;
-        font-weight: 600;
-        border: 1px solid #b7c1d8;
+        min-height: 42px;
+        font-weight: 650;
         background: #ffffff;
-        color: #172033 !important;
+        color: #1b5944 !important;
+        border: 1px solid #9cc8b5;
     }
 
     .stButton > button:hover,
     .stDownloadButton > button:hover {
-        border-color: #5969d8;
-        color: #3f4fc4 !important;
+        border-color: #249568;
+        color: #18734f !important;
+        background: #f2fbf6;
     }
 
-    /* Primary button */
     .stButton > button[kind="primary"] {
-        background: #4f5fd1;
+        background: #19a66b !important;
         color: #ffffff !important;
-        border: none;
+        border: 1px solid #15945f !important;
     }
 
-    /* Text areas */
+    .stButton > button[kind="primary"]:hover {
+        background: #148d59 !important;
+        color: #ffffff !important;
+    }
+
+
+    /* =========================
+       TEXT AREAS
+       ========================= */
+
     textarea {
         background: #ffffff !important;
-        color: #172033 !important;
-        border: 1px solid #d5dbe8 !important;
+        color: #183c31 !important;
+        border: 1px solid #cfe4da !important;
         border-radius: 10px !important;
     }
 
-    /* Select boxes */
-    [data-baseweb="select"] > div {
+    textarea:disabled {
+        color: #284d41 !important;
+        -webkit-text-fill-color: #284d41 !important;
+        opacity: 1 !important;
+    }
+
+
+    /* =========================
+       INPUTS
+       ========================= */
+
+    input {
         background: #ffffff !important;
-        color: #172033 !important;
-        border-color: #d5dbe8 !important;
+        color: #183c31 !important;
     }
 
-    [data-baseweb="select"] * {
-        color: #172033 !important;
-    }
-
-    /* Number inputs */
     [data-testid="stNumberInput"] input {
         background: #ffffff !important;
-        color: #172033 !important;
-        border-color: #d5dbe8 !important;
+        color: #183c31 !important;
+        border-color: #cfe4da !important;
     }
 
-    /* Radio buttons */
+
+    /* =========================
+       SELECT BOX
+       ========================= */
+
+    [data-baseweb="select"] > div {
+        background: #ffffff !important;
+        border-color: #cfe4da !important;
+        color: #183c31 !important;
+    }
+
+    [data-baseweb="select"] {
+        color: #183c31 !important;
+    }
+
+
+    /* =========================
+       RADIO
+       ========================= */
+
     [data-testid="stRadio"] label {
-        color: #25304a !important;
+        color: #24483d !important;
     }
 
-    /* Tabs */
+
+    /* =========================
+       TABS
+       ========================= */
+
     button[data-baseweb="tab"] {
-        color: #4b5872 !important;
+        color: #5a7169 !important;
     }
 
     button[data-baseweb="tab"][aria-selected="true"] {
-        color: #3f4fc4 !important;
+        color: #168457 !important;
         font-weight: 700;
     }
 
-    /* Dataframes */
+
+    /* =========================
+       DATAFRAME
+       ========================= */
+
     [data-testid="stDataFrame"] {
         background: #ffffff;
-        border: 1px solid #dfe4ee;
+        border: 1px solid #d7ebe2;
         border-radius: 12px;
     }
 
-    /* Alerts */
+
+    /* =========================
+       EXPANDER
+       ========================= */
+
+    [data-testid="stExpander"] {
+        background: #ffffff;
+        border: 1px solid #d7ebe2;
+        border-radius: 12px;
+    }
+
+
+    /* =========================
+       ALERTS
+       ========================= */
+
     [data-testid="stAlert"] {
         border-radius: 10px;
     }
 
-    /* Expanders */
-    [data-testid="stExpander"] {
-        background: #ffffff;
-        border: 1px solid #dfe4ee;
-        border-radius: 12px;
-    }
 
-    /* Dividers */
+    /* =========================
+       DIVIDERS
+       ========================= */
+
     hr {
-        border-color: #dfe4ee;
+        border-color: #d7ebe2 !important;
     }
 
-    /* Code blocks */
+
+    /* =========================
+       AUDIO PLAYER
+       ========================= */
+
+    audio {
+        width: 100%;
+    }
+
+
+    /* =========================
+       CODE
+       ========================= */
+
     pre {
-        background: #eef1f7 !important;
-        color: #172033 !important;
+        background: #edf6f1 !important;
+        color: #183c31 !important;
         border-radius: 10px;
     }
 
@@ -201,8 +308,9 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+
 # ============================================================
-# GEMINI CONFIG
+# GEMINI CONFIGURATION
 # ============================================================
 
 API_KEY = st.secrets.get("GEMINI_API_KEY", "")
@@ -211,6 +319,7 @@ if API_KEY:
     client = genai.Client(api_key=API_KEY)
 else:
     client = None
+
 
 PRIMARY_MODEL = "gemini-3.8-flash"
 
@@ -225,24 +334,24 @@ FALLBACK_MODELS = [
 # SESSION STATE
 # ============================================================
 
-DEFAULT_STATE = {
-    "image_result": None,
-    "audio_result": None,
-    "manifest": [],
-    "last_error": None,
-}
+if "image_result" not in st.session_state:
+    st.session_state.image_result = None
 
-for key, value in DEFAULT_STATE.items():
-    if key not in st.session_state:
-        st.session_state[key] = value
+if "audio_result" not in st.session_state:
+    st.session_state.audio_result = None
+
+if "manifest" not in st.session_state:
+    st.session_state.manifest = []
+
+if "last_error" not in st.session_state:
+    st.session_state.last_error = None
 
 
 # ============================================================
-# HELPERS
+# HELPER FUNCTIONS
 # ============================================================
 
 def retryable(error):
-    """Detect common temporary Gemini/API failures."""
     message = str(error).lower()
 
     retry_words = [
@@ -261,7 +370,6 @@ def retryable(error):
 
 
 def response_text(response):
-    """Safely extract text from a Gemini response."""
     if response is None:
         return ""
 
@@ -270,6 +378,7 @@ def response_text(response):
 
         if text:
             return str(text).strip()
+
     except Exception:
         pass
 
@@ -277,18 +386,32 @@ def response_text(response):
         candidates = getattr(response, "candidates", [])
 
         if candidates:
-            content = getattr(candidates[0], "content", None)
+            content = getattr(
+                candidates[0],
+                "content",
+                None,
+            )
 
             if content:
-                parts = getattr(content, "parts", [])
+                parts = getattr(
+                    content,
+                    "parts",
+                    [],
+                )
 
                 output = []
 
                 for part in parts:
-                    text_part = getattr(part, "text", None)
+                    text_part = getattr(
+                        part,
+                        "text",
+                        None,
+                    )
 
                     if text_part:
-                        output.append(str(text_part))
+                        output.append(
+                            str(text_part)
+                        )
 
                 return "\n".join(output).strip()
 
@@ -299,17 +422,11 @@ def response_text(response):
 
 
 def parse_json(text):
-    """
-    Extract JSON even if Gemini surrounds it with markdown fences
-    or additional text.
-    """
-
     if not text:
         return None
 
     cleaned = text.strip()
 
-    # Remove markdown code fences.
     cleaned = re.sub(
         r"^```(?:json)?\s*",
         "",
@@ -327,18 +444,20 @@ def parse_json(text):
 
     try:
         return json.loads(cleaned)
+
     except Exception:
         pass
 
-    # Try to locate JSON object.
     start = cleaned.find("{")
     end = cleaned.rfind("}")
 
-    if start != -1 and end != -1 and end > start:
+    if start != -1 and end != -1:
+
         candidate = cleaned[start:end + 1]
 
         try:
             return json.loads(candidate)
+
         except Exception:
             pass
 
@@ -346,7 +465,6 @@ def parse_json(text):
 
 
 def text_value(data, key, default=""):
-    """Safely get text from a result dictionary."""
     if not isinstance(data, dict):
         return default
 
@@ -362,19 +480,16 @@ def text_value(data, key, default=""):
 
 
 def description_lines(data):
-    """
-    Convert Gemini description output into a clean list.
-    Supports:
-    - list
-    - string separated by newline
-    """
-
     if not isinstance(data, dict):
         return []
 
-    value = data.get("description_lines", [])
+    value = data.get(
+        "description_lines",
+        [],
+    )
 
     if isinstance(value, list):
+
         return [
             str(item).strip()
             for item in value
@@ -382,11 +497,10 @@ def description_lines(data):
         ]
 
     if isinstance(value, str):
-        lines = value.splitlines()
 
         return [
             line.strip()
-            for line in lines
+            for line in value.splitlines()
             if line.strip()
         ]
 
@@ -394,7 +508,6 @@ def description_lines(data):
 
 
 def confidence(data):
-    """Safely retrieve confidence."""
     if not isinstance(data, dict):
         return None
 
@@ -404,19 +517,22 @@ def confidence(data):
         return None
 
     try:
+
         number = float(value)
 
         if number <= 1:
             number *= 100
 
-        return max(0, min(100, number))
+        return max(
+            0,
+            min(100, number),
+        )
 
     except Exception:
         return None
 
 
 def json_config():
-    """Gemini generation configuration."""
     return types.GenerateContentConfig(
         temperature=0.2,
         response_mime_type="application/json",
@@ -424,26 +540,26 @@ def json_config():
 
 
 def generate_with_fallback(contents):
-    """
-    Try the primary model, then fallback models.
-    Returns:
-        response, model_used, error
-    """
 
     if client is None:
-        return None, None, "GEMINI_API_KEY is not configured."
+        return (
+            None,
+            None,
+            "GEMINI_API_KEY is not configured.",
+        )
 
-    models = [PRIMARY_MODEL] + FALLBACK_MODELS
+    models = [
+        PRIMARY_MODEL
+    ] + FALLBACK_MODELS
 
     last_error = None
 
     for model_index, model in enumerate(models):
 
-        attempts = 2
-
-        for attempt in range(attempts):
+        for attempt in range(2):
 
             try:
+
                 response = client.models.generate_content(
                     model=model,
                     contents=contents,
@@ -453,41 +569,61 @@ def generate_with_fallback(contents):
                 text = response_text(response)
 
                 if text:
-                    return response, model, None
+                    return (
+                        response,
+                        model,
+                        None,
+                    )
 
-                last_error = "Gemini returned an empty response."
+                last_error = (
+                    "Gemini returned an empty response."
+                )
 
             except Exception as error:
+
                 last_error = str(error)
 
                 if not retryable(error):
                     break
 
-                if attempt < attempts - 1:
+                if attempt == 0:
                     time.sleep(2)
 
-        # Small pause before switching model.
         if model_index < len(models) - 1:
             time.sleep(1)
 
-    return None, None, last_error or "Gemini request failed."
+    return (
+        None,
+        None,
+        last_error or "Gemini request failed.",
+    )
 
 
-def make_manifest_record(
+def add_manifest(
     mode,
     filename,
-    description_count,
-    qc_pass,
+    requested_lines,
+    actual_lines,
     model,
 ):
-    return {
-        "Timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "Mode": mode,
-        "File": filename,
-        "Description Lines": description_count,
-        "QC": "PASS" if qc_pass else "FAIL",
-        "Model": model or "Unknown",
-    }
+
+    st.session_state.manifest.append(
+        {
+            "Timestamp": time.strftime(
+                "%Y-%m-%d %H:%M:%S"
+            ),
+            "Mode": mode,
+            "File": filename,
+            "Requested Lines": requested_lines,
+            "Actual Lines": actual_lines,
+            "QC": (
+                "PASS"
+                if requested_lines == actual_lines
+                else "FAIL"
+            ),
+            "Model": model or "Unknown",
+        }
+    )
 
 
 # ============================================================
@@ -496,9 +632,11 @@ def make_manifest_record(
 
 with st.sidebar:
 
-    st.title("◈ SEED Lab")
+    st.title("🌿 SEED Lab")
 
-    st.caption("Multimodal Data QC Studio")
+    st.caption(
+        "Multimodal Data QC Studio"
+    )
 
     st.divider()
 
@@ -516,23 +654,32 @@ with st.sidebar:
     st.subheader("System")
 
     if API_KEY:
-        st.success("Gemini API connected")
+        st.success(
+            "Gemini API connected"
+        )
     else:
-        st.error("Gemini API key missing")
+        st.error(
+            "Gemini API key missing"
+        )
 
-    st.caption("AI-assisted data annotation and quality control")
+    st.caption(
+        "AI-assisted data annotation and quality control"
+    )
 
     st.divider()
 
-    st.caption("SEED Lab Multimodal Studio")
-    st.caption("Image + Audio • OCR • Translation • QC")
+    st.caption(
+        "Image • Audio • OCR • Translation • QC"
+    )
 
 
 # ============================================================
-# HEADER
+# MAIN HEADER
 # ============================================================
 
-st.title("SEED Lab Multimodal Studio")
+st.title(
+    "SEED Lab Multimodal Studio"
+)
 
 st.caption(
     "Unified multimodal data annotation, translation and quality-control workspace"
@@ -542,14 +689,14 @@ st.divider()
 
 
 # ============================================================
-# API KEY WARNING
+# API WARNING
 # ============================================================
 
 if not API_KEY:
 
     st.warning(
-        "Gemini API key is not configured. Add GEMINI_API_KEY to "
-        "Streamlit secrets before running analysis."
+        "GEMINI_API_KEY is not configured. "
+        "Add it to Streamlit Secrets before running analysis."
     )
 
 
@@ -562,16 +709,14 @@ if mode == "Image Data Studio":
     st.header("Image Data Studio")
 
     st.caption(
-        "Upload an image for OCR, translation, visual description and QC."
+        "Extract text, translate content, generate visual descriptions and perform QC."
     )
 
-    # --------------------------------------------------------
-    # Controls
-    # --------------------------------------------------------
+    upload_col, lines_col = st.columns(
+        [2, 1]
+    )
 
-    col1, col2 = st.columns([2, 1])
-
-    with col1:
+    with upload_col:
 
         image_file = st.file_uploader(
             "Upload image",
@@ -585,7 +730,7 @@ if mode == "Image Data Studio":
             key="image_uploader",
         )
 
-    with col2:
+    with lines_col:
 
         image_description_count = st.number_input(
             "Description lines required",
@@ -600,302 +745,368 @@ if mode == "Image Data Studio":
 
         image_bytes = image_file.getvalue()
 
-        image = Image.open(io.BytesIO(image_bytes))
+        try:
 
-        st.divider()
+            image = Image.open(
+                io.BytesIO(image_bytes)
+            )
 
-        preview_col, info_col = st.columns([1.3, 1])
+        except Exception as error:
 
-        with preview_col:
+            st.error(
+                f"Could not open image: {error}"
+            )
 
-            st.subheader("Preview")
+            image = None
 
-            st.image(
-                image,
+        if image:
+
+            st.divider()
+
+            preview_col, info_col = st.columns(
+                [1.4, 1]
+            )
+
+            with preview_col:
+
+                st.subheader("Image Preview")
+
+                st.image(
+                    image,
+                    use_container_width=True,
+                )
+
+            with info_col:
+
+                st.subheader(
+                    "File Information"
+                )
+
+                st.metric(
+                    "File size",
+                    f"{len(image_bytes) / 1024:.1f} KB",
+                )
+
+                st.metric(
+                    "Resolution",
+                    f"{image.width} × {image.height}",
+                )
+
+                st.metric(
+                    "Description lines",
+                    image_description_count,
+                )
+
+            st.divider()
+
+            analyze_image = st.button(
+                "Analyze Image",
+                type="primary",
                 use_container_width=True,
             )
 
-        with info_col:
+            if analyze_image:
 
-            st.subheader("File Information")
+                if not API_KEY:
 
-            st.metric(
-                "File size",
-                f"{len(image_bytes) / 1024:.1f} KB",
-            )
+                    st.error(
+                        "Gemini API key is missing."
+                    )
 
-            st.metric(
-                "Resolution",
-                f"{image.width} × {image.height}",
-            )
-
-            st.metric(
-                "Description lines",
-                image_description_count,
-            )
-
-        st.divider()
-
-        analyze_image = st.button(
-            "Analyze Image",
-            type="primary",
-            use_container_width=True,
-        )
-
-        if analyze_image:
-
-            if not API_KEY:
-
-                st.error(
-                    "Gemini API key is missing. Configure GEMINI_API_KEY first."
-                )
-
-            else:
-
-                with st.spinner("Analyzing image with Gemini..."):
+                else:
 
                     prompt = f"""
 You are a professional multimodal data annotation and quality-control assistant.
 
 Analyze the uploaded image.
 
-Return ONLY valid JSON with exactly these keys:
+Return ONLY valid JSON.
+
+Required structure:
 
 {{
-  "ocr_text": "all clearly readable text from the image",
-  "translation": "English translation of the readable text",
+  "ocr_text": "all clearly readable text",
+  "translation": "English translation of readable text",
   "description_lines": [
-    "description line 1",
-    "description line 2"
+    "line 1",
+    "line 2"
   ],
   "confidence": 0.0
 }}
 
-IMPORTANT RULES:
+Rules:
 
-1. description_lines MUST contain exactly {image_description_count} separate lines.
-2. Each line must contain useful visual information.
+1. description_lines MUST contain exactly {image_description_count} lines.
+2. Every line must contain useful visual information.
 3. Do not number the lines.
-4. Do not combine multiple lines into one string.
-5. If there is no readable text, use an empty string for ocr_text.
-6. If translation is not applicable, use an empty string.
-7. confidence must be a number from 0 to 1.
-8. Do not include markdown.
-9. Do not include explanations outside the JSON.
+4. Do not combine lines.
+5. OCR should contain clearly readable text only.
+6. If no readable text exists, use an empty string.
+7. Translation should translate the extracted text into English.
+8. If translation is not applicable, use an empty string.
+9. confidence must be a number from 0 to 1.
+10. Do not output markdown.
+11. Do not output explanations outside the JSON.
 """
 
-                    response, model_used, error = generate_with_fallback(
-                        [
-                            prompt,
-                            image,
-                        ]
-                    )
+                    with st.spinner(
+                        "Analyzing image..."
+                    ):
 
-                if error:
-
-                    st.session_state.last_error = error
-
-                    st.error(
-                        f"Analysis failed: {error}"
-                    )
-
-                else:
-
-                    raw = response_text(response)
-
-                    result = parse_json(raw)
-
-                    if result is None:
-
-                        st.error(
-                            "Gemini responded, but the response could not be parsed as JSON."
+                        response, model_used, error = (
+                            generate_with_fallback(
+                                [
+                                    prompt,
+                                    image,
+                                ]
+                            )
                         )
 
-                        with st.expander("Developer response"):
+                    if error:
 
-                            st.code(
-                                raw or "EMPTY RESPONSE",
-                                language="text",
-                            )
+                        st.session_state.last_error = error
+
+                        st.error(
+                            f"Image analysis failed: {error}"
+                        )
 
                     else:
 
-                        st.session_state.image_result = {
-                            "data": result,
-                            "model": model_used,
-                            "filename": image_file.name,
-                        }
+                        raw = response_text(
+                            response
+                        )
 
-                        st.session_state.manifest.append(
-                            make_manifest_record(
+                        result = parse_json(
+                            raw
+                        )
+
+                        if result is None:
+
+                            st.error(
+                                "Gemini returned a response, but it could not be parsed."
+                            )
+
+                            with st.expander(
+                                "Developer Response"
+                            ):
+
+                                st.code(
+                                    raw or "EMPTY RESPONSE"
+                                )
+
+                        else:
+
+                            st.session_state.image_result = {
+                                "data": result,
+                                "model": model_used,
+                                "filename": image_file.name,
+                            }
+
+                            actual_lines = len(
+                                description_lines(
+                                    result
+                                )
+                            )
+
+                            add_manifest(
                                 "Image",
                                 image_file.name,
-                                len(description_lines(result)),
-                                (
-                                    len(description_lines(result))
-                                    == image_description_count
-                                ),
+                                image_description_count,
+                                actual_lines,
                                 model_used,
                             )
-                        )
 
-                        st.success(
-                            f"Analysis completed using {model_used}"
-                        )
+                            st.success(
+                                f"Analysis completed using {model_used}"
+                            )
 
-        # ----------------------------------------------------
-        # Results
-        # ----------------------------------------------------
+            # =================================================
+            # IMAGE RESULTS
+            # =================================================
 
-        if st.session_state.image_result:
+            if st.session_state.image_result:
 
-            saved = st.session_state.image_result
-
-            result = saved.get("data", {})
-
-            st.divider()
-
-            st.header("Image Analysis Results")
-
-            metric1, metric2, metric3 = st.columns(3)
-
-            with metric1:
-
-                st.metric(
-                    "OCR",
-                    "Available"
-                    if text_value(result, "ocr_text")
-                    else "No text",
+                saved = (
+                    st.session_state.image_result
                 )
 
-            with metric2:
-
-                st.metric(
-                    "Translation",
-                    "Available"
-                    if text_value(result, "translation")
-                    else "N/A",
+                result = saved.get(
+                    "data",
+                    {},
                 )
 
-            with metric3:
+                st.divider()
 
-                conf = confidence(result)
-
-                st.metric(
-                    "Confidence",
-                    f"{conf:.1f}%"
-                    if conf is not None
-                    else "Not supplied",
+                st.header(
+                    "Image Analysis Results"
                 )
-
-            st.divider()
-
-            result_col1, result_col2 = st.columns(2)
-
-            with result_col1:
-
-                st.subheader("OCR Text")
 
                 ocr = text_value(
                     result,
                     "ocr_text",
-                    "No readable text detected.",
                 )
-
-                st.text_area(
-                    "Extracted text",
-                    value=ocr,
-                    height=220,
-                    disabled=True,
-                    label_visibility="collapsed",
-                )
-
-            with result_col2:
-
-                st.subheader("Translation")
 
                 translation = text_value(
                     result,
                     "translation",
-                    "No translation available.",
                 )
 
-                st.text_area(
-                    "Translated text",
-                    value=translation,
-                    height=220,
-                    disabled=True,
-                    label_visibility="collapsed",
+                lines = description_lines(
+                    result
                 )
 
-            st.divider()
+                conf = confidence(
+                    result
+                )
 
-            st.subheader(
-                f"AI Visual Description — {image_description_count} lines requested"
-            )
+                m1, m2, m3 = st.columns(3)
 
-            image_lines = description_lines(result)
+                with m1:
 
-            if image_lines:
-
-                for index, line in enumerate(image_lines, start=1):
-
-                    st.write(
-                        f"**{index}.** {line}"
+                    st.metric(
+                        "OCR",
+                        (
+                            "Available"
+                            if ocr
+                            else "No text"
+                        ),
                     )
 
-            else:
+                with m2:
 
-                st.warning("No visual description was returned.")
-
-            st.divider()
-
-            # ------------------------------------------------
-            # QC
-            # ------------------------------------------------
-
-            st.subheader("Quality Control")
-
-            actual_count = len(image_lines)
-
-            qc1, qc2, qc3 = st.columns(3)
-
-            with qc1:
-
-                if actual_count == image_description_count:
-                    st.success(
-                        f"Description count: PASS ({actual_count})"
-                    )
-                else:
-                    st.error(
-                        f"Description count: FAIL ({actual_count}/{image_description_count})"
+                    st.metric(
+                        "Translation",
+                        (
+                            "Available"
+                            if translation
+                            else "N/A"
+                        ),
                     )
 
-            with qc2:
+                with m3:
 
-                if ocr:
-                    st.success("OCR: PASS")
-                else:
-                    st.warning("OCR: No readable text")
+                    st.metric(
+                        "Confidence",
+                        (
+                            f"{conf:.1f}%"
+                            if conf is not None
+                            else "Not supplied"
+                        ),
+                    )
 
-            with qc3:
+                st.divider()
 
-                if translation:
-                    st.success("Translation: PASS")
-                else:
-                    st.info("Translation: N/A")
-
-            if actual_count == image_description_count:
-
-                st.success(
-                    "Image QC completed successfully."
+                text_col, translation_col = st.columns(
+                    2
                 )
 
-            else:
+                with text_col:
 
-                st.warning(
-                    "Image QC requires the requested number of description lines."
+                    st.subheader(
+                        "OCR Text"
+                    )
+
+                    st.text_area(
+                        "OCR output",
+                        value=(
+                            ocr
+                            if ocr
+                            else "No readable text detected."
+                        ),
+                        height=220,
+                        disabled=True,
+                        label_visibility="collapsed",
+                    )
+
+                with translation_col:
+
+                    st.subheader(
+                        "Translation"
+                    )
+
+                    st.text_area(
+                        "Translation output",
+                        value=(
+                            translation
+                            if translation
+                            else "No translation available."
+                        ),
+                        height=220,
+                        disabled=True,
+                        label_visibility="collapsed",
+                    )
+
+                st.divider()
+
+                st.subheader(
+                    f"AI Visual Description ({image_description_count} lines requested)"
                 )
+
+                if lines:
+
+                    for index, line in enumerate(
+                        lines,
+                        start=1,
+                    ):
+
+                        st.write(
+                            f"**{index}.** {line}"
+                        )
+
+                else:
+
+                    st.warning(
+                        "No visual description was returned."
+                    )
+
+                st.divider()
+
+                st.subheader(
+                    "Quality Control"
+                )
+
+                actual_count = len(lines)
+
+                q1, q2, q3 = st.columns(3)
+
+                with q1:
+
+                    if (
+                        actual_count
+                        == image_description_count
+                    ):
+
+                        st.success(
+                            f"Description count: PASS ({actual_count})"
+                        )
+
+                    else:
+
+                        st.error(
+                            f"Description count: FAIL ({actual_count}/{image_description_count})"
+                        )
+
+                with q2:
+
+                    if ocr:
+                        st.success(
+                            "OCR: PASS"
+                        )
+                    else:
+                        st.info(
+                            "OCR: No readable text"
+                        )
+
+                with q3:
+
+                    if translation:
+                        st.success(
+                            "Translation: PASS"
+                        )
+                    else:
+                        st.info(
+                            "Translation: N/A"
+                        )
 
 
 # ============================================================
@@ -904,15 +1115,19 @@ IMPORTANT RULES:
 
 elif mode == "Audio Data Studio":
 
-    st.header("Audio Data Studio")
-
-    st.caption(
-        "Upload an audio file for transcription, translation, audio description and QC."
+    st.header(
+        "Audio Data Studio"
     )
 
-    col1, col2 = st.columns([2, 1])
+    st.caption(
+        "Transcribe audio, translate speech, generate audio descriptions and perform QC."
+    )
 
-    with col1:
+    upload_col, lines_col = st.columns(
+        [2, 1]
+    )
+
+    with upload_col:
 
         audio_file = st.file_uploader(
             "Upload audio",
@@ -927,7 +1142,7 @@ elif mode == "Audio Data Studio":
             key="audio_uploader",
         )
 
-    with col2:
+    with lines_col:
 
         audio_description_count = st.number_input(
             "Description lines required",
@@ -944,30 +1159,32 @@ elif mode == "Audio Data Studio":
 
         st.divider()
 
-        info1, info2, info3 = st.columns(3)
+        a1, a2, a3 = st.columns(3)
 
-        with info1:
+        with a1:
 
             st.metric(
                 "File size",
                 f"{len(audio_bytes) / (1024 * 1024):.2f} MB",
             )
 
-        with info2:
+        with a2:
 
             st.metric(
                 "Format",
                 audio_file.type or "Unknown",
             )
 
-        with info3:
+        with a3:
 
             st.metric(
                 "Description lines",
                 audio_description_count,
             )
 
-        st.subheader("Audio Preview")
+        st.subheader(
+            "Audio Preview"
+        )
 
         st.audio(
             audio_bytes,
@@ -987,19 +1204,23 @@ elif mode == "Audio Data Studio":
             if not API_KEY:
 
                 st.error(
-                    "Gemini API key is missing. Configure GEMINI_API_KEY first."
+                    "Gemini API key is missing."
                 )
 
             else:
 
                 uploaded_file = None
 
-                with st.spinner("Uploading audio to Gemini..."):
+                with st.spinner(
+                    "Uploading audio..."
+                ):
 
                     try:
 
                         uploaded_file = client.files.upload(
-                            file=io.BytesIO(audio_bytes),
+                            file=io.BytesIO(
+                                audio_bytes
+                            ),
                             config=types.UploadFileConfig(
                                 mime_type=audio_file.type
                             ),
@@ -1013,41 +1234,44 @@ elif mode == "Audio Data Studio":
 
                 if uploaded_file:
 
-                    with st.spinner(
-                        "Transcribing and analyzing audio..."
-                    ):
-
-                        prompt = f"""
+                    prompt = f"""
 You are a professional multimodal data annotation and quality-control assistant.
 
 Analyze the uploaded audio.
 
-Return ONLY valid JSON with exactly these keys:
+Return ONLY valid JSON.
+
+Required structure:
 
 {{
-  "transcript": "complete available speech transcription",
-  "translation": "English translation of the spoken content",
+  "transcript": "complete understandable speech transcription",
+  "translation": "English translation of spoken content",
   "description_lines": [
-    "description line 1",
-    "description line 2"
+    "line 1",
+    "line 2"
   ],
   "confidence": 0.0
 }}
 
-IMPORTANT RULES:
+Rules:
 
-1. description_lines MUST contain exactly {audio_description_count} separate lines.
-2. Each line must describe useful information about the audio.
+1. description_lines MUST contain exactly {audio_description_count} lines.
+2. Every line must contain useful information about the audio.
 3. Do not number the lines.
-4. Do not combine multiple lines into one string.
-5. Include relevant sounds, speech, environment, tone, or events when identifiable.
-6. transcript should contain the spoken content when speech is present.
-7. If there is no understandable speech, use an empty string for transcript.
-8. If translation is not applicable, use an empty string.
-9. confidence must be a number from 0 to 1.
-10. Do not include markdown.
-11. Do not include explanations outside the JSON.
+4. Do not combine lines.
+5. Describe identifiable speech, sounds, environment, events or other useful audio information.
+6. transcript should contain understandable speech.
+7. If there is no understandable speech, use an empty string.
+8. translation should be English.
+9. If translation is not applicable, use an empty string.
+10. confidence must be a number from 0 to 1.
+11. Do not output markdown.
+12. Do not output explanations outside JSON.
 """
+
+                    with st.spinner(
+                        "Transcribing and analyzing audio..."
+                    ):
 
                         response, model_used, error = (
                             generate_with_fallback(
@@ -1068,23 +1292,26 @@ IMPORTANT RULES:
 
                     else:
 
-                        raw = response_text(response)
+                        raw = response_text(
+                            response
+                        )
 
-                        result = parse_json(raw)
+                        result = parse_json(
+                            raw
+                        )
 
                         if result is None:
 
                             st.error(
-                                "Gemini responded, but the audio response could not be parsed as JSON."
+                                "Gemini returned a response, but it could not be parsed."
                             )
 
                             with st.expander(
-                                "Developer response"
+                                "Developer Response"
                             ):
 
                                 st.code(
-                                    raw or "EMPTY RESPONSE",
-                                    language="text",
+                                    raw or "EMPTY RESPONSE"
                                 )
 
                         else:
@@ -1095,44 +1322,38 @@ IMPORTANT RULES:
                                 "filename": audio_file.name,
                             }
 
-                            st.session_state.manifest.append(
-                                make_manifest_record(
-                                    "Audio",
-                                    audio_file.name,
-                                    len(
-                                        description_lines(
-                                            result
-                                        )
-                                    ),
-                                    (
-                                        len(
-                                            description_lines(
-                                                result
-                                            )
-                                        )
-                                        == audio_description_count
-                                    ),
-                                    model_used,
+                            actual_lines = len(
+                                description_lines(
+                                    result
                                 )
+                            )
+
+                            add_manifest(
+                                "Audio",
+                                audio_file.name,
+                                audio_description_count,
+                                actual_lines,
+                                model_used,
                             )
 
                             st.success(
                                 f"Audio analysis completed using {model_used}"
                             )
 
-    # --------------------------------------------------------
+    # ========================================================
     # AUDIO RESULTS
-    # --------------------------------------------------------
+    # ========================================================
 
     if st.session_state.audio_result:
 
-        saved = st.session_state.audio_result
+        saved = (
+            st.session_state.audio_result
+        )
 
-        result = saved.get("data", {})
-
-        st.divider()
-
-        st.header("Audio Analysis Results")
+        result = saved.get(
+            "data",
+            {},
+        )
 
         transcript = text_value(
             result,
@@ -1144,9 +1365,19 @@ IMPORTANT RULES:
             "translation",
         )
 
-        audio_lines = description_lines(result)
+        lines = description_lines(
+            result
+        )
 
-        conf = confidence(result)
+        conf = confidence(
+            result
+        )
+
+        st.divider()
+
+        st.header(
+            "Audio Analysis Results"
+        )
 
         m1, m2, m3 = st.columns(3)
 
@@ -1154,36 +1385,46 @@ IMPORTANT RULES:
 
             st.metric(
                 "Transcript",
-                "Available"
-                if transcript
-                else "No speech detected",
+                (
+                    "Available"
+                    if transcript
+                    else "No speech"
+                ),
             )
 
         with m2:
 
             st.metric(
                 "Translation",
-                "Available"
-                if translation
-                else "N/A",
+                (
+                    "Available"
+                    if translation
+                    else "N/A"
+                ),
             )
 
         with m3:
 
             st.metric(
                 "Confidence",
-                f"{conf:.1f}%"
-                if conf is not None
-                else "Not supplied",
+                (
+                    f"{conf:.1f}%"
+                    if conf is not None
+                    else "Not supplied"
+                ),
             )
 
         st.divider()
 
-        left, right = st.columns(2)
+        transcript_col, translation_col = st.columns(
+            2
+        )
 
-        with left:
+        with transcript_col:
 
-            st.subheader("Live Audio Transcript")
+            st.subheader(
+                "Live Audio Transcript"
+            )
 
             st.text_area(
                 "Transcript",
@@ -1197,9 +1438,11 @@ IMPORTANT RULES:
                 label_visibility="collapsed",
             )
 
-        with right:
+        with translation_col:
 
-            st.subheader("Translation")
+            st.subheader(
+                "Translation"
+            )
 
             st.text_area(
                 "Translation",
@@ -1216,13 +1459,13 @@ IMPORTANT RULES:
         st.divider()
 
         st.subheader(
-            f"AI Audio Description — {audio_description_count} lines requested"
+            f"AI Audio Description ({audio_description_count} lines requested)"
         )
 
-        if audio_lines:
+        if lines:
 
             for index, line in enumerate(
-                audio_lines,
+                lines,
                 start=1,
             ):
 
@@ -1238,15 +1481,20 @@ IMPORTANT RULES:
 
         st.divider()
 
-        st.subheader("Quality Control")
+        st.subheader(
+            "Quality Control"
+        )
 
-        actual_count = len(audio_lines)
+        actual_count = len(lines)
 
         q1, q2, q3 = st.columns(3)
 
         with q1:
 
-            if actual_count == audio_description_count:
+            if (
+                actual_count
+                == audio_description_count
+            ):
 
                 st.success(
                     f"Description count: PASS ({actual_count})"
@@ -1262,33 +1510,29 @@ IMPORTANT RULES:
 
             if transcript:
 
-                st.success("Transcript: PASS")
+                st.success(
+                    "Transcript: PASS"
+                )
 
             else:
 
-                st.warning("Transcript: No speech")
+                st.info(
+                    "Transcript: No speech"
+                )
 
         with q3:
 
             if translation:
 
-                st.success("Translation: PASS")
+                st.success(
+                    "Translation: PASS"
+                )
 
             else:
 
-                st.info("Translation: N/A")
-
-        if actual_count == audio_description_count:
-
-            st.success(
-                "Audio QC completed successfully."
-            )
-
-        else:
-
-            st.warning(
-                "Audio QC requires the requested number of description lines."
-            )
+                st.info(
+                    "Translation: N/A"
+                )
 
 
 # ============================================================
@@ -1297,10 +1541,12 @@ IMPORTANT RULES:
 
 else:
 
-    st.header("Auditor Console")
+    st.header(
+        "Auditor Console"
+    )
 
     st.caption(
-        "Review generated records and export the annotation manifest."
+        "Review annotation records and export the QC manifest."
     )
 
     manifest = st.session_state.manifest
@@ -1308,18 +1554,22 @@ else:
     if not manifest:
 
         st.info(
-            "No analysis records are available yet. "
+            "No analysis records available yet. "
             "Run an Image or Audio analysis first."
         )
 
     else:
 
-        df = pd.DataFrame(manifest)
+        df = pd.DataFrame(
+            manifest
+        )
 
         total = len(df)
 
         passed = int(
-            (df["QC"] == "PASS").sum()
+            (
+                df["QC"] == "PASS"
+            ).sum()
         )
 
         failed = total - passed
@@ -1358,6 +1608,10 @@ else:
 
         with tab1:
 
+            st.subheader(
+                "Annotation Manifest"
+            )
+
             st.dataframe(
                 df,
                 use_container_width=True,
@@ -1366,7 +1620,9 @@ else:
 
             csv_data = df.to_csv(
                 index=False
-            ).encode("utf-8")
+            ).encode(
+                "utf-8"
+            )
 
             st.download_button(
                 "Download CSV Manifest",
@@ -1378,45 +1634,48 @@ else:
 
         with tab2:
 
-            if "Mode" in df.columns:
+            st.subheader(
+                "Records by Mode"
+            )
 
-                st.subheader("Records by Mode")
-
-                mode_counts = (
-                    df["Mode"]
-                    .value_counts()
-                    .rename_axis("Mode")
-                    .reset_index(name="Records")
+            mode_counts = (
+                df["Mode"]
+                .value_counts()
+                .rename_axis("Mode")
+                .reset_index(
+                    name="Records"
                 )
+            )
 
-                st.dataframe(
-                    mode_counts,
-                    use_container_width=True,
-                    hide_index=True,
+            st.dataframe(
+                mode_counts,
+                use_container_width=True,
+                hide_index=True,
+            )
+
+            st.subheader(
+                "QC Summary"
+            )
+
+            qc_counts = (
+                df["QC"]
+                .value_counts()
+                .rename_axis("QC Status")
+                .reset_index(
+                    name="Records"
                 )
+            )
 
-            if "QC" in df.columns:
-
-                st.subheader("QC Summary")
-
-                qc_counts = (
-                    df["QC"]
-                    .value_counts()
-                    .rename_axis("QC Status")
-                    .reset_index(name="Records")
-                )
-
-                st.dataframe(
-                    qc_counts,
-                    use_container_width=True,
-                    hide_index=True,
-                )
+            st.dataframe(
+                qc_counts,
+                use_container_width=True,
+                hide_index=True,
+            )
 
         st.divider()
 
         if st.button(
-            "Clear Auditor Manifest",
-            type="secondary",
+            "Clear Auditor Manifest"
         ):
 
             st.session_state.manifest = []
@@ -1431,5 +1690,5 @@ else:
 st.divider()
 
 st.caption(
-    "SEED Lab Multimodal Studio • Image + Audio Data Quality Control"
+    "🌿 SEED Lab Multimodal Studio • Image + Audio Data Quality Control"
 )

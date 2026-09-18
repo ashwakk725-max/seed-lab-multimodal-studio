@@ -70,10 +70,12 @@ if studio_mode == "🖼️ Image Data Studio":
                             "translated_text": "Translate the extracted text accurately into {target_lang}.",
                             "visual_description": "Provide a clean description of the visual scene, layout, colors, and objects.",
                             "confidence_score": 0.95
-                    }}
-                        Return ONLY the raw JSON string. No markdown wrappers.
+                        }}
+                        Return ONLY the raw JSON string. Do not use any markdown code fences.
                         """
                         response = model.generate_content([prompt, compressed_img])
+                        
+                        # Clean up formatting wrappers safely
                         clean_text = response.text.replace("```json", "").replace("```", "").strip()
                         data = json.loads(clean_text)
                         
@@ -82,7 +84,7 @@ if studio_mode == "🖼️ Image Data Studio":
                         visual_description = data.get("visual_description", "No description available.")
                         ocr_confidence = data.get("confidence_score", 0.90)
                     except Exception as e:
-                        st.error(f"Vision engine error: {str(e)}")
+                        st.error(f"Vision parsing trace error: {str(e)}")
                         extracted_text, translated_text, visual_description, ocr_confidence = "Error", "Error", "Error", 0.0
                     
                 raw_txt = st.text_area("1. Extracted Text (Live OCR)", value=extracted_text, height=70)
@@ -144,12 +146,17 @@ elif studio_mode == "🔊 Audio Data Studio":
         if uploaded_audio is not None:
             st.audio(uploaded_audio, format=f"audio/{uploaded_audio.name.split('.')[-1]}")
             
+            # Formulate fallback placeholders in case parsing takes a step
+            transcript = "No text found."
+            translation = "No translation available."
+            audio_description = "Processing track..."
+            audio_confidence = 0.90
+            
             if API_KEY != "":
                 with st.spinner("🧠 Speech AI is rendering acoustic layers and transcribing..."):
                     try:
                         audio_bytes = uploaded_audio.read()
                         
-                        # FIX: Mapping file types cleanly to official Internet MIME types
                         ext = uploaded_audio.name.split('.')[-1].lower()
                         if ext == "mp3":
                             mime_type = "audio/mpeg"
@@ -166,23 +173,20 @@ elif studio_mode == "🔊 Audio Data Studio":
                         }
 
                         prompt = f"""
-                        Listen to this audio track for an AI data engineering pipeline. 
-                        Return output strictly in this JSON structure:
+                        Analyze this audio track carefully for a data engineering pipeline. 
+                        You MUST return the output strictly matching this template:
                         {{
-                            "transcript": "Transcribe every spoken word exactly. If none, say 'No speech detected.'",
-                            "translation": "Translate the spoken transcript accurately into {target_lang}.",
-                            "audio_description": "Describe acoustic environment details: background noises, speaker tone/emotion, and signal clarity.",
-                            "confidence_score": 0.96
+                            "transcript": "Write the exact song lyrics or spoken text here.",
+                            "translation": "Translate that text cleanly into {target_lang}.",
+                            "audio_description": "Describe the instruments, music genre, background noises, and audio clarity here.",
+                            "confidence_score": 0.95
                         }}
-                        Return ONLY raw JSON. No markdown wrappers.
+                        Do not wrap the text in code blocks. Return the raw string block.
                         """
                         response = model.generate_content([prompt, audio_payload])
-                        clean_text = response.text.replace("```json", "").replace("```", "").strip()
-                        data = json.loads(clean_text)
                         
-                        transcript = data.get("transcript", "No speech detected.")
-                        translation = data.get("translation", "No translation available.")
-                        audio_description = data.get("audio_description", "No acoustic description.")
-                        audio_confidence = data.get("confidence_score", 0.90)
-                    except Exception as e:
-                        st.error(f"Audio engine error: {str(e)}")
+                        # Robust multi-layer cleanup strip logic to prevent silent block errors
+                        raw_response_text = response.text.strip()
+                        if raw_response_text.startswith("```"):
+                            raw_response_text = raw_response_text.split("\n", 1)[1]
+                        if raw_response_text.endswith("```"):

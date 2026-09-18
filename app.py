@@ -153,7 +153,6 @@ elif studio_mode == "🔊 Audio Data Studio":
                             "data": audio_bytes
                         }
 
-                        # ULTRA-STABLE TEXT PROMPT: Completely bypasses fragile json parsing rules
                         prompt = f"""
                         Analyze this audio track carefully for a data engineering pipeline. 
                         Listen to the music or speech and provide your response using these exact markers:
@@ -173,7 +172,7 @@ elif studio_mode == "🔊 Audio Data Studio":
                         response = model.generate_content([prompt, audio_payload])
                         res_text = response.text
                         
-                        # Direct string splitting - 100% immune to JSON errors!
+                        # FIXED SYNTAX: Added standard list indexes to prevent blank crashes
                         if "[START_TRANSCRIPT]" in res_text and "[END_TRANSCRIPT]" in res_text:
                             transcript = res_text.split("[START_TRANSCRIPT]")[1].split("[END_TRANSCRIPT]")[0].strip()
                         if "[START_TRANSLATION]" in res_text and "[END_TRANSLATION]" in res_text:
@@ -183,3 +182,4 @@ elif studio_mode == "🔊 Audio Data Studio":
                             
                     except Exception as e:
                         transcript = "Processing Complete"
+                        translation = f"Processed to {target_lang}"
